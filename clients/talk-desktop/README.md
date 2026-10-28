@@ -60,9 +60,11 @@ Actions → **Build Gantara Talk desktop (rebranded Nextcloud Talk)** → *Run w
 Inputs: `platform` (`linux` or `windows`), `talk_desktop_ref` (upstream tag, default
 `v2.3.3`), and `channel` (`stable`/`beta`/`dev`, the release channel compiled into the
 app; since v2.3 the bundled Talk version is fixed by the tag). Installers are attached to
-a **GitHub Release** `talk-desktop-<ref>` (click Download, then distribute that file).
-They do not count toward Actions storage. Because this repo is private, only people with
-repo access can download from GitHub — customers get the file from you.
+a **GitHub Release** `talk-desktop-<ref>`. They do not count toward Actions storage.
+This repo is private; customers download from the public
+[`Dunetrails/gantara-clients`](https://github.com/Dunetrails/gantara-clients), where
+`publish-public-clients.yml` mirrors each release after its build (see the compliance
+checklist below).
 
 **Windows needs current committed styles.** v2.3.3 bundles Talk v25, which themes itself
 from Nextcloud 35 styles; the committed `styles/34` no longer match. Run
@@ -279,7 +281,10 @@ instead of `com.nextcloud.*`; it is not used as the login default (`enforceDomai
 3. Presented as a modified, unofficial client.
 4. **AGPL copyleft:** provide the modified source to recipients. Here "the source" is
    upstream `nextcloud/talk-desktop@<ref>` + `nextcloud/spreed@<bundled version>` + this
-   `clients/talk-desktop/branding/` overlay — keep it reproducible and available.
+   `clients/talk-desktop/branding/` overlay. `publish-public-clients.yml` publishes the
+   overlay and mirrors each `Gantara_*` release to the public
+   [`Dunetrails/gantara-clients`](https://github.com/Dunetrails/gantara-clients), with release
+   notes naming the upstream tag; customers download only from there.
 
 ## Notes / gotchas
 

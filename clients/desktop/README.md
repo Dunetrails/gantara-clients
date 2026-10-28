@@ -183,8 +183,15 @@ Linux is upstream's `admin/linux/build-appimage.sh`. Windows is KDE Craft via
 `clients/desktop/branding/build-windows.ps1` (same path as upstream's
 `windows-build-and-test.yml`), packaging an unsigned NSIS installer. Both assets attach
 to the same **GitHub Release** (`desktop-<tag>`), which is a browser download and does
-not consume Actions artifact storage. This repo is private, so customers get the file
-from you rather than from GitHub.
+not consume Actions artifact storage.
+
+This repo is private. Customers download from the public
+[`Dunetrails/gantara-clients`](https://github.com/Dunetrails/gantara-clients) instead:
+`.github/workflows/publish-public-clients.yml` mirrors every `Gantara_*` release asset there
+after a successful build, together with this folder and the upstream tag it was built
+from. That is the source offer the GPL requires for a binary we distribute, so a client
+must not reach customers any other way. Every tenant's "Get the desktop app" link
+(`customclient_desktop`) points at that repo.
 
 To apply the branding locally without building, run the script against a checkout — it
 needs `bash`, `sed`, and `inkscape` or `rsvg-convert`:
