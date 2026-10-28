@@ -1,0 +1,98 @@
+name: Refresh Gantara Talk theme styles
+
+# Regenerates the pre-extracted, Gantara-themed Nextcloud styles that let the normal
+# Talk-desktop build SKIP the Docker-based styles extraction (see
+# clients/talk-desktop/README.md). Run this ONLY when the theme colours change,
+# or when a talk_desktop_ref bump changes the bundled Nextcloud major.
+#
+# It spins up a Nextcloud container via Docker, applies our colours with `occ`, extracts the
+# themed CSS, then commits it under clients/talk-desktop/branding/styles/<major>/ (and
+# uploads it as an artifact). Manual trigger only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      talk_desktop_ref:
+        description: "nextcloud/talk-desktop git tag to extract styles for (match the build workflow)."
+        required: true
+        default: "v2.3.3"
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    name: Extract + commit themed styles
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout talk-desktop at pinned tag
+        uses: actions/checkout@v4
+        with:
+          repository: nextcloud/talk-desktop
+          ref: ${{ github.event.inputs.talk_desktop_ref }}
+          path: talk-desktop
+
+      - name: Checkout platform repo (branding overlay, writable)
+        uses: actions/checkout@v4
+        with:
+          path: platform
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install talk-desktop dependencies
+        working-directory: talk-desktop
+        run: npm ci
+
+      - name: Apply Gantara branding (installs the themed build.config)
+        run: bash platform/clients/talk-desktop/branding/apply-branding.sh "${GITHUB_WORKSPACE}/talk-desktop"
+
+      # The extraction reads the bundled Talk's Nextcloud major from its appinfo; since
+      # talk-desktop v2.3 Talk is the @nextcloud/talk npm dependency `npm ci` installed.
+      # Drop any staged styles so the extraction is forced to regenerate instead of
+      # treating already-committed ones as up-to-date.
+      - name: Reset staged styles
+        working-directory: talk-desktop
+        run: |
+          echo "Bundled Talk: $(node -p "require('@nextcloud/talk/package.json').version")"
+          rm -rf .overrides/styles
+
+      - name: Extract themed Nextcloud styles (Docker)
+        working-directory: talk-desktop
+        run: npx -y zx ./scripts/override-nextcloud-styles.mjs --verbose
+
+      - name: Copy extracted styles into the overlay
+        run: |
+          set -euo pipefail
+          SRC="${GITHUB_WORKSPACE}/talk-desktop/.overrides/styles"
+          DEST="${GITHUB_WORKSPACE}/platform/clients/talk-desktop/branding/styles"
+          if [ ! -d "${SRC}" ] || [ -z "$(ls -A "${SRC}" 2>/dev/null)" ]; then
+            echo "::error::No styles were extracted (nothing under ${SRC})"; exit 1
+          fi
+          rm -rf "${DEST}"
+          mkdir -p "${DEST}"
+          cp -r "${SRC}/." "${DEST}/"
+          echo "Extracted majors: $(ls "${DEST}")"
+
+      - name: Upload styles artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: talk-desktop-theme-styles-${{ github.event.inputs.talk_desktop_ref }}
+          path: platform/clients/talk-desktop/branding/styles/**
+          if-no-files-found: error
+
+      - name: Commit & push refreshed styles
+        working-directory: platform
+        run: |
+          set -euo pipefail
+          git add clients/talk-desktop/branding/styles
+          if git diff --cached --quiet; then
+            echo "No style changes to commit."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "chore(clients): refresh Gantara Talk theme styles (${{ github.event.inputs.talk_desktop_ref }})"
+          git push

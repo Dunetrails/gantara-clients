@@ -1,0 +1,20 @@
+{
+	"applicationName": "Dunetrails Talk",
+	"displayName": "Gantara Talk",
+	"vendorName": "Gantara",
+	"description": "Gantara Talk desktop client",
+	"domain": "https://dunetrails.com",
+	"enforceDomain": false,
+	"brandColor": "#31469D",
+	"brandGradient": "linear-gradient(180deg, #324899 0%, #24335F 100%)",
+	"brandFontColor": "#FFFFFF",
+	"primaryColor": "#31469D",
+	"backgroundColor": "#31469D",
+	"helpUrl": "https://gantara.eu/support",
+	"privacyUrl": "https://gantara.eu/privacy-policy",
+	"windowsExe": true,
+	"windowsMsi": false,
+	"macosDmg": false,
+	"linuxFlatpak": false,
+	"linuxZip": true
+}

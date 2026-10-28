@@ -1,0 +1,230 @@
+name: Build Gantara Talk desktop (rebranded Nextcloud Talk)
+
+# Produces Gantara-branded Talk desktop packages for trademark compliance with
+# the Community edition we host (see clients/talk-desktop/README.md). We do NOT
+# keep a divergent fork: each job checks out a PINNED upstream tag and stages a
+# branding overlay (talk-desktop's own .overrides/build.config.json + Gantara
+# icons), then runs upstream's own release:package flow.
+#
+# Outputs:
+#   - Linux: single-file AppImage (electron-forge zip tree wrapped via appimagetool,
+#     with self-integrating AppRun for the applications menu).
+#   - Windows: unsigned Squirrel setup .exe (Start Menu / Programs via the installer).
+#     Signing is deliberately OFF — WINDOWS_SIGN_PARAMS is forced empty. SmartScreen
+#     will warn on first run; Azure Artifact Signing / a cert can be wired later.
+#     Auto-update is off: branded builds do not poll GitHub, and the Squirrel
+#     RELEASES/nupkg update feed is not published.
+#
+# The build config sets primaryColor/backgroundColor to the Gantara colour, which
+# themes the in-app Talk web UI. To keep builds fast, pre-extracted themed styles are
+# committed under clients/talk-desktop/branding/styles/ and staged by apply-branding.sh, so
+# release:package reuses them and skips the Docker-based extraction. If they are absent or
+# stale for the bundled Nextcloud major, the Linux job extracts them itself (Docker, adds
+# several minutes) and the Windows job stops — run the "refresh-talk-styles" workflow first.
+# macOS (and its notarization) stays disabled in the build config.
+#
+# Manual trigger only. Pick Linux or Windows per run (not both). The package
+# is attached to a GitHub Release (browser download; not Actions artifact
+# quota).
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Which package to build. One platform per run."
+        required: true
+        type: choice
+        options:
+          - linux
+          - windows
+        default: linux
+      talk_desktop_ref:
+        description: "nextcloud/talk-desktop git tag to build from."
+        required: true
+        default: "v2.3.3"
+      channel:
+        description: "Release channel compiled into the app: stable, beta or dev. (Since v2.3 the bundled Talk is fixed by the tag.)"
+        required: true
+        default: "stable"
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Rebrand + build Talk desktop (Linux AppImage)
+    if: github.event.inputs.platform == 'linux'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout talk-desktop at pinned tag
+        uses: actions/checkout@v4
+        with:
+          repository: nextcloud/talk-desktop
+          ref: ${{ github.event.inputs.talk_desktop_ref }}
+          path: talk-desktop
+
+      - name: Checkout platform repo (branding overlay)
+        uses: actions/checkout@v4
+        with:
+          path: platform
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # The tray helper talks raw D-Bus, so nothing in the app build exercises it:
+      # a broken pixmap or dbusmenu layout costs the icon or the right-click menu
+      # and only shows up on a user's desktop. Run its self-tests against a real
+      # session bus instead.
+      - name: Validate Linux tray helper (sni_tray.py)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-gi dbus-x11
+          python3 platform/clients/talk-desktop/branding/validate-sni-tray.py
+
+      # generate-icons (run below) needs the dev deps (icon-gen). release:package
+      # re-runs `npm ci` internally, which is harmless and does not touch img/.
+      - name: Install talk-desktop dependencies
+        working-directory: talk-desktop
+        run: npm ci
+
+      - name: Apply Gantara branding
+        run: bash platform/clients/talk-desktop/branding/apply-branding.sh "${GITHUB_WORKSPACE}/talk-desktop"
+
+      - name: Verify branding
+        run: bash platform/clients/talk-desktop/branding/verify-branding.sh "${GITHUB_WORKSPACE}/talk-desktop"
+
+      - name: Generate branded icons
+        working-directory: talk-desktop
+        run: npm run generate-icons
+
+      # Upstream orchestrator: clones the bundled Talk (spreed) version, installs
+      # both trees, runs the (no-op here) styles override, then builds + packages.
+      # --skip-check tolerates our uncommitted branding edits in the working tree.
+      - name: Build + package (Linux)
+        working-directory: talk-desktop
+        env:
+          CHANNEL: ${{ github.event.inputs.channel }}
+        run: npm run release:package -- --linux --skip-check
+
+      # electron-forge has no AppImage maker; wrap the packaged app tree it left
+      # under out/ into a single-file AppImage.
+      - name: Wrap into AppImage
+        run: bash platform/clients/talk-desktop/branding/make-appimage.sh "${GITHUB_WORKSPACE}/talk-desktop"
+
+      # Inject the self-integrating AppRun so the AppImage registers itself in the
+      # applications menu on first launch (no separate install step needed).
+      - name: Embed desktop integration
+        run: |
+          set -euo pipefail
+          for f in "${GITHUB_WORKSPACE}"/talk-desktop/out/appimage/*.AppImage; do
+            bash platform/clients/embed-desktop-integration.sh "${f}"
+          done
+
+      - name: Attach AppImage to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: talk-desktop-${{ github.event.inputs.talk_desktop_ref }}
+          name: Gantara Talk desktop ${{ github.event.inputs.talk_desktop_ref }}
+          body: |
+            Rebranded Nextcloud Talk desktop client. Download the asset and distribute that file.
+            Windows builds are unsigned (SmartScreen will warn) and do not auto-update.
+          files: talk-desktop/out/appimage/*.AppImage
+          fail_on_unmatched_files: true
+          make_latest: false
+
+  windows:
+    name: Rebrand + build Talk desktop (Windows EXE, unsigned)
+    if: github.event.inputs.platform == 'windows'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout talk-desktop at pinned tag
+        uses: actions/checkout@v4
+        with:
+          repository: nextcloud/talk-desktop
+          ref: ${{ github.event.inputs.talk_desktop_ref }}
+          path: talk-desktop
+
+      - name: Checkout platform repo (branding overlay)
+        uses: actions/checkout@v4
+        with:
+          path: platform
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install talk-desktop dependencies
+        working-directory: talk-desktop
+        run: npm ci
+
+      # Git Bash is on windows-latest; apply-branding.sh is POSIX bash.
+      - name: Apply Gantara branding
+        shell: bash
+        run: bash platform/clients/talk-desktop/branding/apply-branding.sh "${GITHUB_WORKSPACE}/talk-desktop"
+
+      - name: Verify branding
+        shell: bash
+        run: bash platform/clients/talk-desktop/branding/verify-branding.sh "${GITHUB_WORKSPACE}/talk-desktop"
+
+      # Without committed, current styles release:package would try the Docker extraction,
+      # which needs Linux containers this runner does not have — fail with the actual fix.
+      - name: Check committed theme styles
+        working-directory: talk-desktop
+        shell: bash
+        run: |
+          node -e "
+            const { getNextcloudStyles, getNextcloudVersionForTalk } = require('./build/resolveBuildConfig.js')
+            if (!getNextcloudStyles().overridesUpToDate) {
+              console.error('::error::No up-to-date theme styles for Nextcloud ' + getNextcloudVersionForTalk() + ' in clients/talk-desktop/branding/styles. Run the refresh-talk-styles workflow for this talk_desktop_ref first.')
+              process.exit(1)
+            }
+          "
+
+      - name: Generate branded icons
+        working-directory: talk-desktop
+        run: npm run generate-icons
+
+      # Unsigned on purpose: WINDOWS_SIGN_PARAMS is forced empty, so forge skips
+      # Authenticode. SmartScreen will warn on first launch until a cert / Azure
+      # Artifact Signing is wired. Do not attach Squirrel's RELEASES/nupkg — those
+      # are an update feed, and this client does not auto-update.
+      - name: Build + package (Windows Squirrel EXE, unsigned)
+        working-directory: talk-desktop
+        env:
+          CHANNEL: ${{ github.event.inputs.channel }}
+          WINDOWS_SIGN_PARAMS: ""
+        run: npm run release:package -- --windows --skip-check
+
+      - name: Collect unsigned setup EXE
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exes = @(Get-ChildItem -Path "talk-desktop\out\make\squirrel.windows" -Recurse -Filter *.exe -ErrorAction SilentlyContinue)
+          if ($exes.Count -eq 0) { throw "Squirrel produced no .exe under talk-desktop/out/make/squirrel.windows" }
+          $nextcloud = @($exes | Where-Object { $_.Name -match '(?i)nextcloud' })
+          if ($nextcloud.Count -gt 0) {
+            throw "Nextcloud-named installer survived branding: $($nextcloud.Name -join ', ')"
+          }
+          if ($exes.Count -ne 1) { throw "Expected one setup .exe, found: $($exes.Name -join ', ')" }
+          # Squirrel names the setup after the kept package id (Dunetrails.Talk); the install
+          # identity lives inside the nupkg, so the download can carry the display name.
+          New-Item -ItemType Directory -Force -Path talk-desktop-windows-out | Out-Null
+          $dest = Join-Path "talk-desktop-windows-out" "Gantara_Talk-windows-x64.exe"
+          Copy-Item -Force $exes[0].FullName $dest
+          Write-Host "artifact: $($exes[0].FullName) -> $dest"
+
+      - name: Attach setup EXE to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: talk-desktop-${{ github.event.inputs.talk_desktop_ref }}
+          name: Gantara Talk desktop ${{ github.event.inputs.talk_desktop_ref }}
+          body: |
+            Rebranded Nextcloud Talk desktop client. Download the asset and distribute that file.
+            Windows builds are unsigned (SmartScreen will warn) and do not auto-update.
+          files: talk-desktop-windows-out/*.exe
+          fail_on_unmatched_files: true
+          make_latest: false

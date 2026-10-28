@@ -1,0 +1,81 @@
+name: Build Nextcloud tenant image (stateless)
+
+# Builds the immutable, apps-baked Nextcloud image used by stateless multi-replica tenants
+# (docs/ha-nextcloud-stateless.md) and pushes it to GHCR. The plan's apps are baked into
+# custom_apps at build time (images/nextcloud-tenant/), so runtime pods need no app install and
+# no shared app PVC.
+#
+# Manual trigger: pick the base Nextcloud tag + the app set, then set the resulting tag in the
+# tenant's customer file (stateless.image) and run a sync. The Nextcloud version is derived from
+# the image at runtime, so there is no separate version field to update.
+
+on:
+  workflow_dispatch:
+    inputs:
+      nextcloud_tag:
+        description: "Base nextcloud image tag. Use the -apache variant for webServer=apache tenants (default) or the -fpm variant for webServer=fpm tenants (docs/ha-nextcloud-fpm.md). The flavor of stateless.image MUST match the tenant's stateless.webServer."
+        required: true
+        default: "35.0.1-fpm"
+      apps:
+        description: "Space-separated NON-shipped app ids to bake (do NOT add shipped apps like twofactor_totp or circles/Teams). On NC35 every app below resolves straight from the appstore, so no pinned-url (id@url) entries are needed — theming_customcss finally has an NC35 release (1.22.0, was pinned to the 1.20.0 tarball because nothing above NC33 existed). Its --force in the ApplicationSet's starter provisionEnforce is now redundant and can be dropped. NOTE: tasks is still absent by choice, not by necessity — 0.18.1 does support NC35 (min 31, max 35), so add 'tasks' here whenever it is wanted. groupfolders (upstream name 'Team Folders', 23.0.1 on NC35) backs the Gantara Hub shared workspace — see docs/identity-and-billing.md. Personal and Family do NOT use it (they are plain per-user quota), but it is inert until a Team Folder is actually created, so baking it everywhere is harmless."
+        required: true
+        default: "calendar contacts notes deck forms polls collectives notify_push onlyoffice user_oidc spreed mail previewgenerator theming_customcss groupfolders integration_google integration_onedrive"
+      image_tag:
+        description: "Tag to publish (e.g. 35.0.1-all for apache, 35.0.1-all-fpm-1 for the fpm flavor). Bump the suffix for a rebuild so the new digest gets a NEW tag (a moved tag won't reliably re-pull / re-sync). Keep 'apache'/'fpm' in the tag to match the base you built from."
+        required: true
+        default: "35.0.1-all-fpm-5"
+      php_rebuild_version:
+        description: "TEMPORARY (PHP2Shell CVE-2026-109618/109619): patched PHP version the Dockerfile recompiles into the base image. NC 34/35 bases ship PHP 8.5.11 and need 8.5.12. Must match the base image's PHP branch. Set to '' only after the official nextcloud base is rebuilt AND the recompile stage is removed from the Dockerfile."
+        required: true
+        default: "8.5.12"
+      php_rebuild_sha256:
+        description: "sha256 of the php-<version>.tar.xz from the php.net advisory, checked before compiling. 8.5.12 = 08bc2eba2a588654ade1357174aa646b761556c862dda0678345ee29ed481209."
+        required: true
+        default: "08bc2eba2a588654ade1357174aa646b761556c862dda0678345ee29ed481209"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/dunetrails/nextcloud-tenant
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Hetzner cx33 nodes are x86_64, so amd64 only — keeps the build fast (the app downloads
+      # run under no emulation). Add linux/arm64 here if the cluster ever gains arm nodes.
+      - name: Build and push (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: images/nextcloud-tenant
+          file: images/nextcloud-tenant/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            NEXTCLOUD_TAG=${{ github.event.inputs.nextcloud_tag }}
+            APPS=${{ github.event.inputs.apps }}
+            PHP_REBUILD_VERSION=${{ github.event.inputs.php_rebuild_version }}
+            PHP_REBUILD_SHA256=${{ github.event.inputs.php_rebuild_sha256 }}
+          tags: ${{ env.IMAGE }}:${{ github.event.inputs.image_tag }}
+          labels: |
+            # GHCR links a package to a repo via this label, and the linked repo is what decides
+            # whether a repo's GITHUB_TOKEN may push. It pointed at the pre-fork k8s-platform repo,
+            # so pushes from here were denied (permission_denied: write_package).
+            org.opencontainers.image.source=https://github.com/Dunetrails/k8s-platform-ovh
+            org.opencontainers.image.description=Immutable Nextcloud image with plan apps baked in (stateless tenants)
+            org.opencontainers.image.licenses=AGPL-3.0-or-later

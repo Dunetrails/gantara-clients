@@ -1,0 +1,191 @@
+name: Build Gantara desktop client (rebranded Nextcloud)
+
+# Builds the Nextcloud desktop sync client as Gantara, for trademark
+# compliance with the Community edition we host. See clients/desktop/README.md.
+#
+# There is no fork: the job checks out a pinned upstream tag and
+# clients/desktop/branding/apply-branding.sh rewrites the marks in place, so
+# following a new upstream release is a desktop_ref bump, plus builder_image
+# for Linux. Windows reads its Craft blueprint branches from the tag's own
+# craftmaster.ini.
+#
+# Outputs:
+#   - Linux: AppImage via upstream admin/linux/build-appimage.sh
+#   - Windows: unsigned NSIS installer via KDE Craft (same toolchain as
+#     upstream windows-build-and-test.yml). SIGN_PACKAGE stays false —
+#     SmartScreen will warn until a cert is wired later.
+#
+# Manual trigger. Pick Linux or Windows per run. The package is attached to a
+# GitHub Release, which is a browser download and does not consume Actions
+# artifact storage.
+#
+# Deliberately out of scope: macOS packages, Authenticode signing, and an
+# update server — the client is built with the updater compiled out.
+#
+# This workflow does not touch the Talk client; that is build-talk-desktop.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Which package to build. One platform per run."
+        required: true
+        type: choice
+        options:
+          - linux
+          - windows
+        default: windows
+      desktop_ref:
+        description: "nextcloud/desktop tag to build. apply-branding.sh is written against v35.0.x — see clients/desktop/README.md."
+        required: true
+        default: "v35.0.0"
+      builder_image:
+        description: "Nextcloud's own AppImage build container, as pinned by the tag's .github/workflows/linux-appimage.yml. Used when platform=linux."
+        required: true
+        default: "ghcr.io/nextcloud/continuous-integration-client-appimage-qt6:client-appimage-el9-6.11.2-4"
+      craft_blueprint_branch:
+        description: "Optional override for both Craft blueprint branches. Empty uses the tag's craftmaster.ini. Used when platform=windows."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    name: Rebrand and build AppImage (x86_64)
+    if: github.event.inputs.platform == 'linux'
+    runs-on: ubuntu-latest
+    container: ${{ github.event.inputs.builder_image }}
+    timeout-minutes: 180
+    steps:
+      - name: Check out this repo (branding overlay)
+        uses: actions/checkout@v4
+        with:
+          path: platform
+
+      - name: Check out nextcloud/desktop at the pinned tag
+        uses: actions/checkout@v4
+        with:
+          repository: nextcloud/desktop
+          ref: ${{ github.event.inputs.desktop_ref }}
+          submodules: recursive
+          path: desktop
+
+      # The container runs as root while the checkouts are owned by another uid,
+      # so git refuses to touch them until they are marked safe.
+      - name: Trust the workspace directories
+        run: git config --global --add safe.directory '*'
+
+      # Aborts the run if any string it rewrites has moved upstream, and sweeps
+      # the result for surviving marks. A tag bump that breaks branding fails
+      # here rather than shipping a Nextcloud-branded package.
+      - name: Apply Gantara branding
+        run: bash platform/clients/desktop/branding/apply-branding.sh "${GITHUB_WORKSPACE}/desktop"
+
+      # Upstream's script, upstream's arguments. The names and the icon path it
+      # needs are already patched into it, so the only thing worth stating here
+      # is the updater: no appcast is hosted, so it is compiled out.
+      - name: Configure, compile and package
+        id: build
+        working-directory: desktop
+        run: |
+          BUILD_UPDATER=OFF \
+          DESKTOP_CLIENT_ROOT="$(pwd)" \
+          QT_BASE_DIR=/root/linux-gcc-x86_64 \
+            /bin/bash -c "./admin/linux/build-appimage.sh"
+
+      # The script names its output <executable>-master-<sha>-x86_64.AppImage,
+      # after the commit of whatever repo the run belongs to — this one, not the
+      # client's. Rename it after the client version actually built.
+      - name: Name the AppImage after the client version
+        id: package
+        env:
+          BUILT: ${{ steps.build.outputs.APPIMAGE_NAME }}
+          DESKTOP_REF: ${{ github.event.inputs.desktop_ref }}
+        run: |
+          set -euo pipefail
+          cd desktop
+          name="Gantara_Desktop-${DESKTOP_REF#v}-x86_64.AppImage"
+          mv -f "${BUILT}" "${name}"
+          echo "name=${name}" >>"${GITHUB_OUTPUT}"
+          ls -l "${name}"
+
+      - name: Attach the AppImage to a GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-${{ github.event.inputs.desktop_ref }}
+          name: Gantara Desktop ${{ github.event.inputs.desktop_ref }}
+          body: |
+            Gantara-branded build of the Nextcloud desktop sync client
+            ${{ github.event.inputs.desktop_ref }}.
+
+            Linux: install with `clients/install-appimage.sh`.
+            Windows: unsigned NSIS setup (SmartScreen will warn).
+            The client does not check for updates; a new version means a new
+            build here.
+          files: desktop/${{ steps.package.outputs.name }}
+          fail_on_unmatched_files: true
+          make_latest: false
+
+  windows:
+    name: Rebrand and build Windows installer (unsigned)
+    if: github.event.inputs.platform == 'windows'
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - name: Check out this repo (branding overlay)
+        uses: actions/checkout@v4
+        with:
+          path: platform
+
+      - name: Check out nextcloud/desktop at the pinned tag
+        uses: actions/checkout@v4
+        with:
+          repository: nextcloud/desktop
+          ref: ${{ github.event.inputs.desktop_ref }}
+          submodules: recursive
+          path: desktop
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Icon SVG → PNG rasterisation during the cmake/craft build.
+      - name: Install Inkscape
+        shell: pwsh
+        run: choco install inkscape --yes --no-progress
+
+      # Git Bash is on windows-2022; apply-branding.sh is POSIX bash.
+      - name: Apply Gantara branding
+        shell: bash
+        run: bash platform/clients/desktop/branding/apply-branding.sh "${GITHUB_WORKSPACE}/desktop"
+
+      # KDE Craft: install deps from Nextcloud's binary cache, compile the branded
+      # tree, package an NSIS installer. Unsigned on purpose (SIGN_PACKAGE=False).
+      - name: Build + package Windows (Craft / NSIS)
+        shell: pwsh
+        run: |
+          & "${{ github.workspace }}\platform\clients\desktop\branding\build-windows.ps1" `
+            -DesktopSrc "${{ github.workspace }}\desktop" `
+            -Workspace "${{ github.workspace }}" `
+            -BlueprintBranch "${{ github.event.inputs.craft_blueprint_branch }}" `
+            -DesktopRef "${{ github.event.inputs.desktop_ref }}"
+
+      - name: Attach installer to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-${{ github.event.inputs.desktop_ref }}
+          name: Gantara Desktop ${{ github.event.inputs.desktop_ref }}
+          body: |
+            Gantara-branded build of the Nextcloud desktop sync client
+            ${{ github.event.inputs.desktop_ref }}.
+
+            Linux: install with `clients/install-appimage.sh`.
+            Windows: unsigned NSIS setup (SmartScreen will warn).
+            The client does not check for updates; a new version means a new
+            build here.
+          files: desktop-windows-out/*
+          fail_on_unmatched_files: true
+          make_latest: false

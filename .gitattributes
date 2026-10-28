@@ -1,0 +1,30 @@
+# Normalize all text files to LF in the repository AND the working tree on every
+# platform. This repo targets Linux (k8s manifests, Helm, bash, CI), and PowerShell
+# handles LF fine, so LF everywhere avoids the phantom "modified" churn that
+# core.autocrlf=true produces on Windows checkouts.
+* text=auto eol=lf
+
+# Be explicit for the file types we ship.
+*.sh    text eol=lf
+*.ps1   text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.tpl   text eol=lf
+*.tf    text eol=lf
+*.hcl   text eol=lf
+*.php   text eol=lf
+*.html  text eol=lf
+*.age   text eol=lf
+
+# Binary assets — never touch line endings.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.pdf   binary
+*.gz    binary
+*.zip   binary

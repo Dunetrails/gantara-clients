@@ -1,0 +1,16 @@
+{
+  "versionRef": "v35.0.0",
+  "versionRefType": "tag",
+  "versionMajor": 35,
+  "version": "35.0.0.10",
+  "versionString": "35.0.0",
+  "versionCommitHash": "da02f41d",
+  "themingConfigs": [
+    {
+      "name": "",
+      "primaryColor": "#31469D",
+      "backgroundColor": "#31469D",
+      "prefix": ""
+    }
+  ]
+}
