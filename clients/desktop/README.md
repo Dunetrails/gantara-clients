@@ -190,8 +190,9 @@ This repo is private. Customers download from the public
 `.github/workflows/publish-public-clients.yml` mirrors every `Gantara_*` release asset there
 after a successful build, together with this folder and the upstream tag it was built
 from. That is the source offer the GPL requires for a binary we distribute, so a client
-must not reach customers any other way. Every tenant's "Get the desktop app" link
-(`customclient_desktop`) points at that repo.
+must not reach customers any other way. The support documentation links to that repo.
+The web interface does not: its client links (`customclient_*`) stay on the upstream
+defaults, the official Nextcloud apps.
 
 To apply the branding locally without building, run the script against a checkout — it
 needs `bash`, `sed`, and `inkscape` or `rsvg-convert`:
