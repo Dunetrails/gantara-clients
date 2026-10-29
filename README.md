@@ -5,12 +5,14 @@ changes in the open-source software it runs.
 
 ## Download
 
-Get the latest version from the [Releases page](https://github.com/Dunetrails/gantara-clients/releases).
+Click a link to download the newest version:
 
 | Application | Windows | Linux |
 |--|--|--|
-| **Gantara Desktop** — keeps your files in sync with your computer | `Gantara_Desktop-<version>-x64-setup.exe` | `Gantara_Desktop-<version>-x86_64.AppImage` |
-| **Gantara Talk** — chat and calls, on plans that include them | `Gantara_Talk-windows-x64.exe` | `Gantara_Talk-x86_64.AppImage` |
+| **Gantara Desktop** — keeps your files in sync with your computer | [Download for Windows](https://github.com/Dunetrails/gantara-clients/releases/download/desktop-latest/Gantara_Desktop-x64-setup.exe) | [Download for Linux](https://github.com/Dunetrails/gantara-clients/releases/download/desktop-latest/Gantara_Desktop-x86_64.AppImage) |
+| **Gantara Talk** — chat and calls, on plans that include them | [Download for Windows](https://github.com/Dunetrails/gantara-clients/releases/download/talk-latest/Gantara_Talk-x64-setup.exe) | [Download for Linux](https://github.com/Dunetrails/gantara-clients/releases/download/talk-latest/Gantara_Talk-x86_64.AppImage) |
+
+Earlier versions are on the [Releases page](https://github.com/Dunetrails/gantara-clients/releases).
 
 When the application asks for a server address, enter the address you use in your browser, for
 example `https://app.gantara.eu`.
