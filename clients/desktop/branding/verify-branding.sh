@@ -69,6 +69,8 @@ expect_in_file src/gui/navigationpanehelper.cpp 'const auto currentAppName = QLa
     "Explorer sidebar entry keyed on APPLICATION_SHORTNAME"
 expect_in_file src/libsync/settings/devicesources.cpp 'ConfigFile::unbrandedAppName) : Theme::instance()->appName();' \
     "policy registry path keyed on APPLICATION_SHORTNAME"
+expect_in_file src/gui/application.cpp 'setApplicationDisplayName(_theme->appNameGUI());' \
+    "untitled windows show the display name, not APPLICATION_SHORTNAME"
 
 # Our block is appended, so the effective value of anything set twice is the
 # last one. Checking that literally is what proves the override wins.

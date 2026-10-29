@@ -30,6 +30,7 @@ $Version = if ($DesktopRef) { $DesktopRef -replace '^v', '' } else { "" }
 $DesktopSrc = (Resolve-Path $DesktopSrc).Path
 $CraftMaster = Join-Path $Workspace "CraftMaster"
 $CraftConfig = Join-Path $DesktopSrc "craftmaster.ini"
+$NsisTemplateStaged = Join-Path $Workspace "$CraftTarget\tmp\dunetrails-brand\NullsoftInstaller.nsi"
 $BrandingDir = $PSScriptRoot
 # Brand identity comes from branding.env, the same file apply-branding.sh reads.
 # Hardcoding it here let the two drift: the installer kept advertising a domain
@@ -49,8 +50,7 @@ function Get-BrandValue([string]$Key) {
     return $BrandEnv[$Key]
 }
 $AppName = Get-BrandValue "APPLICATION_NAME"
-# Install identity: Program Files folder, registry and uninstall keys. Keeps the
-# name the client first shipped under, so a new installer upgrades in place.
+# The name the client first shipped under; only used to move an old Start-menu folder.
 $InstallId = Get-BrandValue "APPLICATION_SHORTNAME"
 $AppExe = Get-BrandValue "APPLICATION_EXECUTABLE"
 $Company = Get-BrandValue "APPLICATION_VENDOR"
@@ -125,11 +125,10 @@ function Get-NextcloudClientBlacklistFiles {
 }
 
 # Craft's NSIS template names the install folder, the registry key and the
-# uninstall key after productname, which is also the name it shows. Key those
-# three on install_id instead, so productname can carry the display name while
-# the installer still upgrades an existing install in place.
+# uninstall key after productname (Gantara); every installer has shipped that
+# way, so they stay as they are and a new installer upgrades in place.
 function Patch-NsisTemplate {
-    Write-Host "==> Patch Craft NSIS template: install identity separate from display name"
+    Write-Host "==> Patch Craft NSIS template: publisher, finish page, desktop shortcut"
     # <target>\craft is a junction to the craft-core clone; -Recurse does not follow junctions.
     $known = Join-Path $Workspace "$CraftTarget\craft\bin\Packager\Nsis\NullsoftInstaller.nsi"
     if (Test-Path $known) {
@@ -142,22 +141,49 @@ function Patch-NsisTemplate {
     }
     if ($templates.Count -eq 0) { throw "could not locate Craft's Packager/Nsis/NullsoftInstaller.nsi" }
     $edits = [ordered]@{
-        '!define regkey "Software\@{company}\@{productname}"' = '!define regkey "Software\@{company}\@{install_id}"'
-        '!define uninstkey "Software\Microsoft\Windows\CurrentVersion\Uninstall\@{productname}"' = '!define uninstkey "Software\Microsoft\Windows\CurrentVersion\Uninstall\@{install_id}"'
-        '!define MULTIUSER_INSTALLMODE_INSTDIR "@{productname}"' = '!define MULTIUSER_INSTALLMODE_INSTDIR "@{install_id}"'
         '"Publisher" "@{company}"' = '"Publisher" "@{publisher}"'
+        # Craft's finish page neither starts the client nor offers a desktop shortcut, and the
+        # client only registers its autostart entry once an account is set up, so after a plain
+        # install nothing runs. The installer is elevated; Explorer starts the client as the user.
+        '!insertmacro MUI_PAGE_FINISH' = @(
+            '!define MUI_FINISHPAGE_RUN'
+            '!define MUI_FINISHPAGE_RUN_TEXT "Start @{productname}"'
+            '!define MUI_FINISHPAGE_RUN_FUNCTION LaunchAsUser'
+            '!define MUI_FINISHPAGE_SHOWREADME'
+            '!define MUI_FINISHPAGE_SHOWREADME_TEXT "Create a desktop shortcut"'
+            '!define MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateDesktopShortcut'
+            '!insertmacro MUI_PAGE_FINISH'
+        ) -join "`n"
+        'Function .onInit' = @(
+            'Function LaunchAsUser'
+            ('Exec ''"$WINDIR\explorer.exe" "$INSTDIR\bin\' + $AppExe + '.exe"''')
+            'FunctionEnd'
+            ''
+            'Function CreateDesktopShortcut'
+            ('CreateShortCut "$DESKTOP\@{productname}.lnk" "$INSTDIR\bin\' + $AppExe + '.exe"')
+            'FunctionEnd'
+            ''
+            'Function .onInit'
+        ) -join "`n"
+        'RMDir /r "$SMPROGRAMS\$StartMenuFolder"' = @(
+            'RMDir /r "$SMPROGRAMS\$StartMenuFolder"'
+            'Delete "$DESKTOP\@{productname}.lnk"'
+        ) -join "`n"
     }
-    foreach ($tpl in $templates) {
-        $nsi = Get-Content -Raw $tpl.FullName
-        foreach ($from in $edits.Keys) {
-            $to = $edits[$from]
-            if ($nsi.IndexOf($to) -ge 0) { continue }
-            if ($nsi.IndexOf($from) -lt 0) { throw "NSIS template anchor not found in $($tpl.FullName): $from" }
-            $nsi = $nsi.Replace($from, $to)
-        }
-        [System.IO.File]::WriteAllText($tpl.FullName, $nsi)
-        Write-Host "    patched $($tpl.FullName)"
+    # CraftMaster runs `git checkout -f` on the craft clone at the start of every call, which
+    # would undo an in-place edit before --package runs. Write the patched copy outside the
+    # clone; the blueprint points the packager's scriptname at it.
+    $tpl = $templates[0]
+    $nsi = Get-Content -Raw $tpl.FullName
+    foreach ($from in $edits.Keys) {
+        $to = $edits[$from]
+        if ($nsi.IndexOf($to) -ge 0) { continue }
+        if ($nsi.IndexOf($from) -lt 0) { throw "NSIS template anchor not found in $($tpl.FullName): $from" }
+        $nsi = $nsi.Replace($from, $to)
     }
+    New-Item -ItemType Directory -Force -Path (Split-Path $NsisTemplateStaged) | Out-Null
+    [System.IO.File]::WriteAllText($NsisTemplateStaged, $nsi)
+    Write-Host "    patched $($tpl.FullName) -> $NsisTemplateStaged"
 }
 
 # Rewrite the Craft blueprint so NSIS ships our identity.
@@ -214,7 +240,7 @@ function Patch-NextcloudClientBlueprint {
         # on uninstall (RMDir of StartMenuFolder does not cover it).
         $shortcutAssign = "self.defines[`"shortcuts`"] = [{`"name`": `"$AppName`", `"target`": r`"bin\$AppExe.exe`", `"icon`": r`"$stagedIco`", `"description`": `"$AppDescription`", `"appId`": `"$AppRevDomain`"}]"
         $unAssign = 'self.defines["un_sections"] = ''Section "Un.Shortcuts"\nDelete "$SMPROGRAMS\\' + $AppName + '.lnk"\nSectionEnd'''
-        # install_id / publisher feed Patch-NsisTemplate. The Start-menu page
+        # publisher feeds Patch-NsisTemplate. The Start-menu page
         # preselects the folder an earlier install recorded; move one still
         # carrying the install id over to the display name.
         $identityAssign = "self.defines[`"install_id`"] = `"$InstallId`"`n        self.defines[`"publisher`"] = `"$AppName`"`n        self.defines[`"preInstallHook`"] = 'StrCmp `$StartMenuFolder `"$InstallId`" 0 +2\nStrCpy `$StartMenuFolder `"$AppName`"'"
@@ -223,6 +249,13 @@ function Patch-NextcloudClientBlueprint {
             'self.applicationExecutable = "nextcloud"',
             "self.defines[`"executable`"] = r`"bin\$AppExe.exe`"`n        self.defines[`"icon`"] = r`"$stagedIco`"`n        self.defines[`"icon_png`"] = r`"$stagedPng`"`n        $identityAssign`n        $shortcutAssign`n        $unAssign"
         )
+        # The packager reads its template from scriptname; see Patch-NsisTemplate.
+        $scriptAssign = "self.scriptname = r`"$NsisTemplateStaged`""
+        if ($py -match 'self\.scriptname\s*=') {
+            $py = [regex]::Replace($py, 'self\.scriptname\s*=\s*r?"[^"]*"', $scriptAssign.Replace('$', '$$'))
+        } else {
+            $py = ([regex]'(?m)^([ \t]*)(self\.defines\["executable"\]\s*=.*)$').Replace($py, "`$1`$2`n`$1$($scriptAssign.Replace('$', '$$'))", 1)
+        }
         # Re-runs: force-refresh icon paths and shortcuts (applicationExecutable already gone).
         $py = [regex]::Replace($py, 'self\.defines\["icon"\]\s*=\s*r?"[^"]*"', "self.defines[`"icon`"] = r`"$stagedIco`"")
         $py = [regex]::Replace($py, 'self\.defines\["icon_png"\]\s*=\s*r?"[^"]*"', "self.defines[`"icon_png`"] = r`"$stagedPng`"")
@@ -271,6 +304,7 @@ function Patch-NextcloudClientBlueprint {
             installId   = "defines[`"install_id`"] = `"$InstallId`""
             appId       = "`"appId`": `"$AppRevDomain`""
             icon        = 'defines["icon"] = r"'
+            nsisScript  = "self.scriptname = r`"$NsisTemplateStaged`""
             importOs    = 'import os'
         }
         foreach ($name in $checks.Keys) {

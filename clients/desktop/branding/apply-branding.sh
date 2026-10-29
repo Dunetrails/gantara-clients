@@ -177,6 +177,11 @@ rewrite "${DESKTOP}/src/gui/navigationpanehelper.cpp" \
 rewrite "${DESKTOP}/src/gui/navigationpanehelper.cpp" \
     'QStringLiteral("ApplicationName"), REG_SZ, QLatin1String(APPLICATION_NAME));' \
     'QStringLiteral("ApplicationName"), REG_SZ, QLatin1String(APPLICATION_SHORTNAME));'
+# The application name is the short name, for the settings paths above. Windows without a
+# title of their own (the account wizard) show the display name, which defaults to it.
+rewrite "${DESKTOP}/src/gui/application.cpp" \
+    'setWindowIcon(_theme->applicationIcon());' \
+    'setWindowIcon(_theme->applicationIcon()); setApplicationDisplayName(_theme->appNameGUI());'
 
 # --------------------------------------------------------------------------
 step "Artwork"

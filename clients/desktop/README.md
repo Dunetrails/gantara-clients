@@ -70,9 +70,13 @@ identities from the display name: the settings directory (`~/.config/<name>`,
 `%APPDATA%\<name>`), admin policy paths, the Windows virtual-files sync-root id and the
 Explorer sidebar entry. `apply-branding.sh` pins those to the short name, and
 `verify-branding.sh` checks each pin. Without that, renaming the product would orphan
-every existing account. On Windows the NSIS installer does the same: the Program Files
-folder, the registry key and the uninstall key stay "Dunetrails", while the setup window,
-the Start menu, Add/Remove Programs and the publisher say Gantara.
+every existing account. The Windows installer is named Gantara throughout: setup window,
+Start menu, Add/Remove Programs, publisher, and also the Program Files folder, registry
+key and uninstall key, which is how every installer has shipped, so a new one upgrades in
+place. Craft's template is patched into a copy outside the craft clone, because CraftMaster
+force-checks-out that clone at the start of every call; the blueprint's `scriptname` points
+at the copy. The patch adds "Start Gantara" and "Create a desktop shortcut" to the finish
+page.
 
 **Links.** The add-account wizard's server-address hint, its "sign up" and
 "host your own server" buttons, the Client Push link in Settings, the Help menu, and the
