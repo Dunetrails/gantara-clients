@@ -36,7 +36,8 @@ AUTOSTART_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/autostart"
 # NOT the .desktop "Name=" (upstream ships "<brand> Desktop"). Getting this wrong
 # desynchronises the in-app "Launch on system startup" checkbox from the file that
 # actually starts the client.
-APPLICATION_SHORTNAME=""
+# The default lets a customer run this script on its own, without the repo next to it.
+APPLICATION_SHORTNAME="Dunetrails"
 if [ -f "${SCRIPT_DIR}/desktop/branding/branding.env" ]; then
   # shellcheck source=desktop/branding/branding.env
   . "${SCRIPT_DIR}/desktop/branding/branding.env"
