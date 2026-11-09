@@ -12,8 +12,8 @@
 #
 # Built + pushed by .github/workflows/build-nextcloud-tenant.yml to
 # ghcr.io/dunetrails/nextcloud-tenant. To build locally instead:
-#   docker build -t ghcr.io/dunetrails/nextcloud-tenant:35.0.1-all \
-#     --build-arg NEXTCLOUD_TAG=35.0.1-fpm \
+#   docker build -t ghcr.io/dunetrails/nextcloud-tenant:35.0.2-all-fpm-1 \
+#     --build-arg NEXTCLOUD_TAG=35.0.2-fpm \
 #     --build-arg APPS="calendar contacts notes deck forms polls collectives notify_push onlyoffice user_oidc spreed previewgenerator theming_customcss" \
 #     images/nextcloud-tenant
 #
@@ -31,121 +31,18 @@
 #
 # FLAVOR (apache vs fpm): this single Dockerfile builds BOTH web-tier flavors — the only
 # difference is the base tag you pass. The app baking + PHP ini baking below are flavor-agnostic.
-#   - fpm (default)    : NEXTCLOUD_TAG=35.0.1-fpm     -> publish e.g. :35.0.1-all-fpm-1
-#   - apache (opt-in)  : NEXTCLOUD_TAG=35.0.1-apache  -> publish e.g. :35.0.1-all-1   (mod_php)
+#   - fpm (default)    : NEXTCLOUD_TAG=35.0.2-fpm     -> publish e.g. :35.0.2-all-fpm-1
+#   - apache (opt-in)  : NEXTCLOUD_TAG=35.0.2-apache  -> publish e.g. :35.0.2-all-1   (mod_php)
 # All three tenants run the fpm flavor (docs/ha-nextcloud-fpm.md), so fpm is the default here
 # and in the workflow's nextcloud_tag input; keep both in sync.
 # The chart selects the flavor per tenant via stateless.webServer (apache|fpm); the fpm flavor
 # adds an nginx sidecar in front of php-fpm (docs/ha-nextcloud-fpm.md). Point stateless.image at
 # the tag whose flavor matches stateless.webServer.
 
-# TEMPORARY PHP security rebuild (PHP2Shell, CVE-2026-109618/CVE-2026-109619, CVSS 9.2,
-# unauthenticated RCE in PHP core — NC 35.0.1 is a confirmed in-the-wild target). The official
-# nextcloud base images still ship PHP 8.5.11; the fix is 8.5.12. Until the upstream images are
-# rebuilt on 8.5.12 (nextcloud/docker#2605), the php-build stage below recompiles the pinned
-# patched PHP tarball ON TOP OF THE SAME BASE, reproducing the official docker-library configure
-# line (the hardening flags are already in the image env as PHP_CFLAGS/PHP_CPPFLAGS/PHP_LDFLAGS).
-# Only PHP changes; everything below it stays byte identical. Shared extensions compiled against
-# 8.5.11 keep loading because the 8.5 extension API version is unchanged in 8.5.12.
-# DROP THIS STAGE (and the two COPY --from=php-build lines + the verification RUN) as soon as
-# `docker run --rm nextcloud:<tag> php -v` reports the patched version, then rebuild from the
-# official base.
-ARG NEXTCLOUD_TAG=35.0.1-fpm
-# Patched PHP release to bake in, and its sha256 from the php.net advisory. Default: 8.5.12
-# (what NC 34/35 need). The stage always runs; point both at whatever patched release matches
-# the base's PHP branch.
-ARG PHP_REBUILD_VERSION=8.5.12
-ARG PHP_REBUILD_SHA256=08bc2eba2a588654ade1357174aa646b761556c862dda0678345ee29ed481209
-
-FROM nextcloud:${NEXTCLOUD_TAG} AS php-build
-ARG NEXTCLOUD_TAG
-ARG PHP_REBUILD_VERSION
-ARG PHP_REBUILD_SHA256
-RUN set -eux; \
-    savedAptMark="$(apt-mark showmanual)"; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
-        $PHPIZE_DEPS \
-        apache2-dev \
-        libargon2-dev \
-        libcurl4-openssl-dev \
-        libonig-dev \
-        libreadline-dev \
-        libsodium-dev \
-        libsqlite3-dev \
-        libssl-dev \
-        libxml2-dev \
-        zlib1g-dev \
-    ; \
-    curl -fsSL -o /usr/src/php.tar.xz \
-      "https://www.php.net/distributions/php-${PHP_REBUILD_VERSION}.tar.xz"; \
-    echo "${PHP_REBUILD_SHA256} */usr/src/php.tar.xz" | sha256sum -c -; \
-    rm -f /usr/src/php.tar.xz.asc; \
-    docker-php-source extract; \
-    cd /usr/src/php; \
-    gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
-    debMultiarch="$(dpkg-architecture --query DEB_BUILD_MULTIARCH)"; \
-    case "${NEXTCLOUD_TAG}" in \
-      *-fpm) sapiFlags='--disable-cgi --enable-fpm --with-fpm-user=www-data --with-fpm-group=www-data' ;; \
-      *) sapiFlags='--disable-cgi --with-apxs2' ;; \
-    esac; \
-    export \
-      CFLAGS="$PHP_CFLAGS" \
-      CPPFLAGS="$PHP_CPPFLAGS" \
-      LDFLAGS="$PHP_LDFLAGS" \
-      PHP_BUILD_PROVIDER='https://github.com/docker-library/php' \
-      PHP_UNAME='Linux - Docker' \
-    ; \
-    ./configure \
-      --build="$gnuArch" \
-      --sysconfdir="${PHP_INI_DIR%/php}" \
-      --with-config-file-path="$PHP_INI_DIR" \
-      --with-config-file-scan-dir="$PHP_INI_DIR/conf.d" \
-      --enable-option-checking=fatal \
-      --with-mhash \
-      --with-pic \
-      --enable-mbstring \
-      --enable-mysqlnd \
-      --with-password-argon2 \
-      --with-sodium=shared \
-      --with-pdo-sqlite=/usr \
-      --with-sqlite3=/usr \
-      --with-curl \
-      --with-iconv \
-      --with-openssl \
-      --with-readline \
-      --with-zlib \
-      --disable-phpdbg \
-      --with-pear \
-      --with-libdir="lib/$debMultiarch" \
-      $sapiFlags \
-    ; \
-    make -j "$(nproc)"; \
-    find . -type f -name '*.a' -delete; \
-    make install; \
-    find /usr/local -type f -perm '/0111' -exec sh -euxc 'strip --strip-all "$@" || :' -- '{}' +; \
-    cp -v php.ini-* "$PHP_INI_DIR/"; \
-    php -v | grep -q "PHP ${PHP_REBUILD_VERSION} "; \
-    mkdir -p /root/apache-modules; \
-    if [ -f /usr/lib/apache2/modules/libphp.so ]; then \
-      cp /usr/lib/apache2/modules/libphp.so /root/apache-modules/libphp.so; \
-    fi
-
+# PHP2Shell (CVE-2026-109618/CVE-2026-109619): 35.0.1 and older bases ship PHP 8.5.11, which is
+# vulnerable. Build from 35.0.2-fpm (PHP 8.5.12) or newer.
+ARG NEXTCLOUD_TAG=35.0.2-fpm
 FROM nextcloud:${NEXTCLOUD_TAG}
-ARG PHP_REBUILD_VERSION
-# Overlay the rebuilt PHP (and the patched source tarball, so docker-php-ext-install / pecl
-# build against the patched release) over the stock base. apache flavor: make install already
-# wrote the new libphp.so via apxs — copying /usr/local covers the binaries; the module copy
-# below is what actually swaps mod_php.
-COPY --from=php-build /usr/local /usr/local
-COPY --from=php-build /usr/src/php.tar.xz /usr/src/php.tar.xz
-COPY --from=php-build /root/apache-modules /tmp/apache-modules
-RUN set -eux; \
-    if [ -f /tmp/apache-modules/libphp.so ]; then \
-      cp /tmp/apache-modules/libphp.so /usr/lib/apache2/modules/libphp.so; \
-    fi; \
-    rm -rf /tmp/apache-modules; \
-    php -v | grep -q "PHP ${PHP_REBUILD_VERSION} "
 
 # Space-separated app ids to bake in. Keep this aligned with the tenant's plan app set
 # (docs/plans.md). ExApps (app_api) are intentionally NOT included.

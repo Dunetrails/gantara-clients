@@ -15,7 +15,7 @@ on:
       nextcloud_tag:
         description: "Base nextcloud image tag. Use the -apache variant for webServer=apache tenants (default) or the -fpm variant for webServer=fpm tenants (docs/ha-nextcloud-fpm.md). The flavor of stateless.image MUST match the tenant's stateless.webServer."
         required: true
-        default: "35.0.1-fpm"
+        default: "35.0.2-fpm"
       apps:
         description: "Space-separated NON-shipped app ids to bake (do NOT add shipped apps like twofactor_totp or circles/Teams). On NC35 every app below resolves straight from the appstore, so no pinned-url (id@url) entries are needed — theming_customcss finally has an NC35 release (1.22.0, was pinned to the 1.20.0 tarball because nothing above NC33 existed). Its --force in the ApplicationSet's starter provisionEnforce is now redundant and can be dropped. NOTE: tasks is still absent by choice, not by necessity — 0.18.1 does support NC35 (min 31, max 35), so add 'tasks' here whenever it is wanted. groupfolders (upstream name 'Team Folders', 23.0.1 on NC35) backs the Gantara Hub shared workspace — see docs/identity-and-billing.md. Personal and Family do NOT use it (they are plain per-user quota), but it is inert until a Team Folder is actually created, so baking it everywhere is harmless."
         required: true
@@ -23,15 +23,7 @@ on:
       image_tag:
         description: "Tag to publish (e.g. 35.0.1-all for apache, 35.0.1-all-fpm-1 for the fpm flavor). Bump the suffix for a rebuild so the new digest gets a NEW tag (a moved tag won't reliably re-pull / re-sync). Keep 'apache'/'fpm' in the tag to match the base you built from."
         required: true
-        default: "35.0.1-all-fpm-5"
-      php_rebuild_version:
-        description: "TEMPORARY (PHP2Shell CVE-2026-109618/109619): patched PHP version the Dockerfile recompiles into the base image. NC 34/35 bases ship PHP 8.5.11 and need 8.5.12. Must match the base image's PHP branch. Set to '' only after the official nextcloud base is rebuilt AND the recompile stage is removed from the Dockerfile."
-        required: true
-        default: "8.5.12"
-      php_rebuild_sha256:
-        description: "sha256 of the php-<version>.tar.xz from the php.net advisory, checked before compiling. 8.5.12 = 08bc2eba2a588654ade1357174aa646b761556c862dda0678345ee29ed481209."
-        required: true
-        default: "08bc2eba2a588654ade1357174aa646b761556c862dda0678345ee29ed481209"
+        default: "35.0.2-all-fpm-1"
 
 permissions:
   contents: read
@@ -69,8 +61,6 @@ jobs:
           build-args: |
             NEXTCLOUD_TAG=${{ github.event.inputs.nextcloud_tag }}
             APPS=${{ github.event.inputs.apps }}
-            PHP_REBUILD_VERSION=${{ github.event.inputs.php_rebuild_version }}
-            PHP_REBUILD_SHA256=${{ github.event.inputs.php_rebuild_sha256 }}
           tags: ${{ env.IMAGE }}:${{ github.event.inputs.image_tag }}
           labels: |
             # GHCR links a package to a repo via this label, and the linked repo is what decides
