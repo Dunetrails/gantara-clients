@@ -71,6 +71,12 @@ expect_in_file src/libsync/settings/devicesources.cpp 'ConfigFile::unbrandedAppN
     "policy registry path keyed on APPLICATION_SHORTNAME"
 expect_in_file src/gui/application.cpp 'setApplicationDisplayName(_theme->appNameGUI());' \
     "untitled windows show the display name, not APPLICATION_SHORTNAME"
+if sed -n '/^QString Theme::defaultClientFolder() const$/,/^}/p' src/libsync/theme.cpp 2>/dev/null \
+        | grep -qF 'return appNameGUI();'; then
+    pass "default sync folder is named after APPLICATION_NAME"
+else
+    fail "default sync folder is named after APPLICATION_SHORTNAME — expected Theme::defaultClientFolder() to return appNameGUI()"
+fi
 
 # Our block is appended, so the effective value of anything set twice is the
 # last one. Checking that literally is what proves the override wins.

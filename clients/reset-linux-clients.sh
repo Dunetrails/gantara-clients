@@ -50,6 +50,9 @@ ICON_ROOT="${DATA_HOME}/icons/hicolor"
 # the reverse-DNS ids, and the AppImage filenames. The clients are shown as
 # Gantara, but every id, executable and installed filename still says dunetrails.
 BRAND_RE='dunetrails'
+# The sync folder of a new account is named after the display name (~/Gantara),
+# so its GTK bookmark does not carry the id. Matched as a path, not as a word.
+BOOKMARK_RE="${BRAND_RE}|/Gantara[0-9]*( |\$)"
 
 found=0
 note() { printf '  %s\n' "$*"; }
@@ -165,8 +168,8 @@ else
 fi
 
 header "File-manager bookmarks and MIME defaults"
-strip_lines "${CONFIG_HOME}/gtk-3.0/bookmarks" "${BRAND_RE}"
-strip_lines "${CONFIG_HOME}/gtk-4.0/bookmarks" "${BRAND_RE}"
+strip_lines "${CONFIG_HOME}/gtk-3.0/bookmarks" "${BOOKMARK_RE}"
+strip_lines "${CONFIG_HOME}/gtk-4.0/bookmarks" "${BOOKMARK_RE}"
 strip_lines "${CONFIG_HOME}/mimeapps.list" "${BRAND_RE}"
 strip_lines "${DATA_HOME}/applications/mimeapps.list" "${BRAND_RE}"
 
@@ -182,7 +185,8 @@ if [ "${APPLY}" = 1 ]; then
   echo "  Done. Log out and back in so the session forgets the old autostart entry."
   echo
   echo "  Left untouched on purpose:"
-  echo "    - your synced files (e.g. ~/Dunetrails). Delete the folder yourself if"
+  echo "    - your synced files (~/Gantara, or ~/Dunetrails for accounts set up"
+  echo "      before the rename). Delete the folder yourself if"
   echo "      you want the next sign-in to re-download everything."
   echo "    - the saved password in the keyring. To drop it:"
   echo "        secret-tool search --all server '<your-server-host>'"

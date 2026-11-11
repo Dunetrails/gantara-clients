@@ -38,6 +38,7 @@ AUTOSTART_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/autostart"
 # actually starts the client.
 # The default lets a customer run this script on its own, without the repo next to it.
 APPLICATION_SHORTNAME="Dunetrails"
+APPLICATION_NAME="Gantara"
 if [ -f "${SCRIPT_DIR}/desktop/branding/branding.env" ]; then
   # shellcheck source=desktop/branding/branding.env
   . "${SCRIPT_DIR}/desktop/branding/branding.env"
@@ -96,10 +97,12 @@ purge_user_data() {
   echo "    purged ${cache}"
 
   # The client appends its sync folder to the GTK bookmarks (Utility::setupFavLink)
-  # and never removes it, so repeated test installs stack up duplicates.
+  # and never removes it, so repeated test installs stack up duplicates. New
+  # accounts sync into ~/<APPLICATION_NAME>, older ones into ~/<APPLICATION_SHORTNAME>.
   local bookmarks="${XDG_CONFIG_HOME:-${HOME}/.config}/gtk-3.0/bookmarks"
-  if [ -f "${bookmarks}" ] && grep -qi "${AUTOSTART_NAME}" "${bookmarks}"; then
-    grep -vi "${AUTOSTART_NAME}" "${bookmarks}" > "${bookmarks}.tmp" || true
+  local bookmark_re="${AUTOSTART_NAME}|/${APPLICATION_NAME}[0-9]*( |\$)"
+  if [ -f "${bookmarks}" ] && grep -qiE "${bookmark_re}" "${bookmarks}"; then
+    grep -viE "${bookmark_re}" "${bookmarks}" > "${bookmarks}.tmp" || true
     mv -f "${bookmarks}.tmp" "${bookmarks}"
     echo "    cleaned ${bookmarks}"
   fi

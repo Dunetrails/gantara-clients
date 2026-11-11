@@ -183,6 +183,19 @@ rewrite "${DESKTOP}/src/gui/application.cpp" \
     'setWindowIcon(_theme->applicationIcon());' \
     'setWindowIcon(_theme->applicationIcon()); setApplicationDisplayName(_theme->appNameGUI());'
 
+# The other way round: the default local folder a new account syncs into
+# (~/<name>) is a folder users see, so it takes the display name. Existing
+# accounts store their folder path in the settings and keep it.
+need_file "${DESKTOP}/src/libsync/theme.cpp"
+grep -qF -- 'QString Theme::defaultClientFolder() const' "${DESKTOP}/src/libsync/theme.cpp" \
+    || die "anchor not found in src/libsync/theme.cpp: QString Theme::defaultClientFolder() const"
+sed -i '/^QString Theme::defaultClientFolder() const$/,/^}/s/^\(    return \)appName();$/\1appNameGUI();/' \
+    "${DESKTOP}/src/libsync/theme.cpp"
+sed -n '/^QString Theme::defaultClientFolder() const$/,/^}/p' "${DESKTOP}/src/libsync/theme.cpp" \
+    | grep -qF -- 'return appNameGUI();' \
+    || die "could not point Theme::defaultClientFolder() at appNameGUI() in src/libsync/theme.cpp"
+printf '    src/libsync/theme.cpp: Theme::defaultClientFolder() -> appNameGUI()\n'
+
 # --------------------------------------------------------------------------
 step "Artwork"
 # --------------------------------------------------------------------------

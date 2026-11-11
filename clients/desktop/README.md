@@ -70,7 +70,9 @@ identities from the display name: the settings directory (`~/.config/<name>`,
 `%APPDATA%\<name>`), admin policy paths, the Windows virtual-files sync-root id and the
 Explorer sidebar entry. `apply-branding.sh` pins those to the short name, and
 `verify-branding.sh` checks each pin. Without that, renaming the product would orphan
-every existing account. The Windows installer is named Gantara throughout: setup window,
+every existing account. The default sync folder of a new account goes the other way: it is
+named after the display name (`~/Gantara`), not the short name upstream uses. Accounts
+set up earlier keep `~/Dunetrails`, because the client stores each folder's path. The Windows installer is named Gantara throughout: setup window,
 Start menu, Add/Remove Programs, publisher, and also the Program Files folder, registry
 key and uninstall key, which is how every installer has shipped, so a new one upgrades in
 place. Craft's template is patched into a copy outside the craft clone, because CraftMaster
