@@ -52,6 +52,7 @@ jobs:
       # Hetzner cx33 nodes are x86_64, so amd64 only — keeps the build fast (the app downloads
       # run under no emulation). Add linux/arm64 here if the cluster ever gains arm nodes.
       - name: Build and push (amd64)
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: images/nextcloud-tenant
@@ -69,3 +70,43 @@ jobs:
             org.opencontainers.image.source=https://github.com/Dunetrails/k8s-platform-ovh
             org.opencontainers.image.description=Immutable Nextcloud image with plan apps baked in (stateless tenants)
             org.opencontainers.image.licenses=AGPL-3.0-or-later
+
+      # Vulnerability scan and SBOM of the pushed digest (docs/security-scanning.md). Report only:
+      # findings land in the job summary and as warnings; the full report and the CycloneDX SBOM
+      # are kept as an artifact.
+      - name: Install trivy
+        env:
+          TRIVY_VERSION: 0.76.2
+          TRIVY_SHA256: bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf
+        run: |
+          set -euo pipefail
+          tarball="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${tarball}"
+          echo "${TRIVY_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" trivy
+
+      - name: Scan image and write SBOM (report only)
+        continue-on-error: true
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST_REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          TAG_REF: ${{ env.IMAGE }}:${{ github.event.inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/trivy-image"
+          "$RUNNER_TEMP/trivy" image --quiet --scanners vuln,secret --list-all-pkgs \
+            --format json --output "$RUNNER_TEMP/trivy-image/report.json" "$DIGEST_REF"
+          "$RUNNER_TEMP/trivy" convert --quiet --format cyclonedx \
+            --output "$RUNNER_TEMP/trivy-image/sbom.cdx.json" "$RUNNER_TEMP/trivy-image/report.json"
+          bash .github/scripts/trivy-image-report.sh "$RUNNER_TEMP/trivy-image/report.json" "$TAG_REF"
+
+      - name: Upload trivy report and SBOM
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trivy-image-nextcloud-tenant
+          path: ${{ runner.temp }}/trivy-image/
+          if-no-files-found: ignore
+          retention-days: 90
