@@ -49,24 +49,28 @@ on:
         default: ""
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   appimage:
     name: Rebrand and build AppImage (x86_64)
     if: github.event.inputs.platform == 'linux'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # publishes the GitHub release
     container: ${{ github.event.inputs.builder_image }}
     timeout-minutes: 180
     steps:
       - name: Check out this repo (branding overlay)
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           path: platform
 
       - name: Check out nextcloud/desktop at the pinned tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           repository: nextcloud/desktop
           ref: ${{ github.event.inputs.desktop_ref }}
           submodules: recursive
@@ -112,7 +116,7 @@ jobs:
           ls -l "${name}"
 
       - name: Attach the AppImage to a GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: desktop-${{ github.event.inputs.desktop_ref }}
           name: Gantara Desktop ${{ github.event.inputs.desktop_ref }}
@@ -132,23 +136,27 @@ jobs:
     name: Rebrand and build Windows installer (unsigned)
     if: github.event.inputs.platform == 'windows'
     runs-on: windows-2022
+    permissions:
+      contents: write # publishes the GitHub release
     timeout-minutes: 360
     steps:
       - name: Check out this repo (branding overlay)
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           path: platform
 
       - name: Check out nextcloud/desktop at the pinned tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           repository: nextcloud/desktop
           ref: ${{ github.event.inputs.desktop_ref }}
           submodules: recursive
           path: desktop
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
@@ -166,15 +174,18 @@ jobs:
       # tree, package an NSIS installer. Unsigned on purpose (SIGN_PACKAGE=False).
       - name: Build + package Windows (Craft / NSIS)
         shell: pwsh
+        env:
+          BLUEPRINT_BRANCH: ${{ github.event.inputs.craft_blueprint_branch }}
+          DESKTOP_REF: ${{ github.event.inputs.desktop_ref }}
         run: |
-          & "${{ github.workspace }}\platform\clients\desktop\branding\build-windows.ps1" `
-            -DesktopSrc "${{ github.workspace }}\desktop" `
-            -Workspace "${{ github.workspace }}" `
-            -BlueprintBranch "${{ github.event.inputs.craft_blueprint_branch }}" `
-            -DesktopRef "${{ github.event.inputs.desktop_ref }}"
+          & "$env:GITHUB_WORKSPACE\platform\clients\desktop\branding\build-windows.ps1" `
+            -DesktopSrc "$env:GITHUB_WORKSPACE\desktop" `
+            -Workspace "$env:GITHUB_WORKSPACE" `
+            -BlueprintBranch "$env:BLUEPRINT_BRANCH" `
+            -DesktopRef "$env:DESKTOP_REF"
 
       - name: Attach installer to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: desktop-${{ github.event.inputs.desktop_ref }}
           name: Gantara Desktop ${{ github.event.inputs.desktop_ref }}

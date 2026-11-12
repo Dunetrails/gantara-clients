@@ -26,19 +26,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout talk-desktop at pinned tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           repository: nextcloud/talk-desktop
           ref: ${{ github.event.inputs.talk_desktop_ref }}
           path: talk-desktop
 
       - name: Checkout platform repo (branding overlay, writable)
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: true # a later step pushes with these credentials
           path: platform
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
 
@@ -77,7 +79,7 @@ jobs:
           echo "Extracted majors: $(ls "${DEST}")"
 
       - name: Upload styles artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: talk-desktop-theme-styles-${{ github.event.inputs.talk_desktop_ref }}
           path: platform/clients/talk-desktop/branding/styles/**
@@ -85,6 +87,8 @@ jobs:
 
       - name: Commit & push refreshed styles
         working-directory: platform
+        env:
+          TALK_DESKTOP_REF: ${{ github.event.inputs.talk_desktop_ref }}
         run: |
           set -euo pipefail
           git add clients/talk-desktop/branding/styles
@@ -94,5 +98,5 @@ jobs:
           fi
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -m "chore(clients): refresh Gantara Talk theme styles (${{ github.event.inputs.talk_desktop_ref }})"
+              commit -m "chore(clients): refresh Gantara Talk theme styles (${TALK_DESKTOP_REF})"
           git push
