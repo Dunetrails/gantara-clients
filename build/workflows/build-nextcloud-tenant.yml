@@ -51,7 +51,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Hetzner cx33 nodes are x86_64, so amd64 only — keeps the build fast (the app downloads
+      # OVH MKS nodes (b3/c3 flavors) are x86_64, so amd64 only — keeps the build fast (the app downloads
       # run under no emulation). Add linux/arm64 here if the cluster ever gains arm nodes.
       - name: Build and push (amd64)
         id: build
