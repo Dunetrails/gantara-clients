@@ -56,7 +56,7 @@ with `appimagetool`.
 
 ## Running it
 
-Actions → **Build Gantara Talk desktop (rebranded Nextcloud Talk)** → *Run workflow*.
+Actions → **Build: Gantara Talk desktop client** → *Run workflow*.
 Inputs: `platform` (`linux` or `windows`), `talk_desktop_ref` (upstream tag, default
 `v2.3.3`), and `channel` (`stable`/`beta`/`dev`, the release channel compiled into the
 app; since v2.3 the bundled Talk version is fixed by the tag). Installers are attached to

@@ -1,4 +1,4 @@
-name: Build Nextcloud tenant image (stateless)
+name: "Build: Nextcloud tenant image"
 
 # Builds the immutable, apps-baked Nextcloud image used by stateless multi-replica tenants
 # (docs/ha-nextcloud-stateless.md) and pushes it to GHCR. The plan's apps are baked into
@@ -34,6 +34,7 @@ env:
 
 jobs:
   build:
+    name: Build, push and scan (Trivy, SBOM)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

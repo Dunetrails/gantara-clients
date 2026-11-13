@@ -1,4 +1,4 @@
-name: Refresh Gantara Talk theme styles
+name: "Build: Talk desktop theme styles (refresh)"
 
 # Regenerates the pre-extracted, Gantara-themed Nextcloud styles that let the normal
 # Talk-desktop build SKIP the Docker-based styles extraction (see

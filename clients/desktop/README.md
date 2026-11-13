@@ -175,7 +175,7 @@ it reads the Craft blueprint branches from the tag's own `craftmaster.ini`.
 
 ## Building
 
-Actions → **Build Gantara desktop client (rebranded Nextcloud)** → *Run workflow*.
+Actions → **Build: Gantara desktop sync client** → *Run workflow*.
 
 - `platform` — `linux` or `windows` (one per run; default `windows`).
 - `desktop_ref` — the upstream tag to build (default `v35.0.0`).

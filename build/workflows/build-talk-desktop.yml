@@ -1,4 +1,4 @@
-name: Build Gantara Talk desktop (rebranded Nextcloud Talk)
+name: "Build: Gantara Talk desktop client"
 
 # Produces Gantara-branded Talk desktop packages for trademark compliance with
 # the Community edition we host (see clients/talk-desktop/README.md). We do NOT
@@ -20,7 +20,8 @@ name: Build Gantara Talk desktop (rebranded Nextcloud Talk)
 # committed under clients/talk-desktop/branding/styles/ and staged by apply-branding.sh, so
 # release:package reuses them and skips the Docker-based extraction. If they are absent or
 # stale for the bundled Nextcloud major, the Linux job extracts them itself (Docker, adds
-# several minutes) and the Windows job stops — run the "refresh-talk-styles" workflow first.
+# several minutes) and the Windows job stops — run the "Build: Talk desktop theme styles (refresh)" workflow
+# (refresh-talk-styles.yml) first.
 # macOS (and its notarization) stays disabled in the build config.
 #
 # Manual trigger only. Pick Linux or Windows per run (not both). The package

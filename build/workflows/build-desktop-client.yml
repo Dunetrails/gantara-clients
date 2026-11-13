@@ -1,4 +1,4 @@
-name: Build Gantara desktop client (rebranded Nextcloud)
+name: "Build: Gantara desktop sync client"
 
 # Builds the Nextcloud desktop sync client as Gantara, for trademark
 # compliance with the Community edition we host. See clients/desktop/README.md.
