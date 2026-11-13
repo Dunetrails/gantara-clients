@@ -116,7 +116,7 @@ jobs:
           ls -l "${name}"
 
       - name: Attach the AppImage to a GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: desktop-${{ github.event.inputs.desktop_ref }}
           name: Gantara Desktop ${{ github.event.inputs.desktop_ref }}
@@ -185,7 +185,7 @@ jobs:
             -DesktopRef "$env:DESKTOP_REF"
 
       - name: Attach installer to GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: desktop-${{ github.event.inputs.desktop_ref }}
           name: Gantara Desktop ${{ github.event.inputs.desktop_ref }}
