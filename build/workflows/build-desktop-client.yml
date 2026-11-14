@@ -14,6 +14,8 @@ name: "Build: Gantara desktop sync client"
 #   - Windows: unsigned NSIS installer via KDE Craft (same toolchain as
 #     upstream windows-build-and-test.yml). SIGN_PACKAGE stays false —
 #     SmartScreen will warn until a cert is wired later.
+#   - Both: Gantara_Desktop-<version>-source.tar.gz (clients/make-source-tarball.sh),
+#     the corresponding source of the packages, attached by the source job.
 #
 # Manual trigger. Pick Linux or Windows per run. The package is attached to a
 # GitHub Release, which is a browser download and does not consume Actions
@@ -38,11 +40,11 @@ on:
       desktop_ref:
         description: "nextcloud/desktop tag to build. apply-branding.sh is written against v35.0.x — see clients/desktop/README.md."
         required: true
-        default: "v35.0.0"
+        default: "v35.0.3"
       builder_image:
         description: "Nextcloud's own AppImage build container, as pinned by the tag's .github/workflows/linux-appimage.yml. Used when platform=linux."
         required: true
-        default: "ghcr.io/nextcloud/continuous-integration-client-appimage-qt6:client-appimage-el9-6.11.2-4"
+        default: "ghcr.io/nextcloud/continuous-integration-client-appimage-qt6:client-appimage-el9-6.11.2-5"
       craft_blueprint_branch:
         description: "Optional override for both Craft blueprint branches. Empty uses the tag's craftmaster.ini. Used when platform=windows."
         required: false
@@ -98,6 +100,15 @@ jobs:
           DESKTOP_CLIENT_ROOT="$(pwd)" \
           QT_BASE_DIR=/root/linux-gcc-x86_64 \
             /bin/bash -c "./admin/linux/build-appimage.sh"
+
+      # apply-branding.sh installs them into share/<executable>/licenses, which
+      # build-appimage.sh moves into the AppDir. Fail if a tag stops doing that.
+      - name: Check the licences are in the AppImage
+        run: |
+          set -euo pipefail
+          for f in COPYING THIRD-PARTY-NOTICES.md LICENSES/LGPL-3.0-or-later.txt LICENSES/Apache-2.0.txt; do
+            ls /app/AppDir/usr/share/*/licenses/"${f}"
+          done
 
       # The script names its output <executable>-master-<sha>-x86_64.AppImage,
       # after the commit of whatever repo the run belongs to — this one, not the
@@ -200,3 +211,55 @@ jobs:
           files: desktop-windows-out/*
           fail_on_unmatched_files: true
           make_latest: false
+
+  # Runs after whichever platform was built, so the release it attaches to exists.
+  # The tarball only depends on the two commits, so a Linux and a Windows run from
+  # the same commit upload identical bytes.
+  source:
+    name: Attach the source tarball
+    needs: [appimage, windows]
+    if: always() && (needs.appimage.result == 'success' || needs.windows.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # uploads to the release
+    steps:
+      - name: Check out this repo (branding overlay)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: platform
+
+      - name: Check out nextcloud/desktop at the pinned tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          repository: nextcloud/desktop
+          ref: ${{ github.event.inputs.desktop_ref }}
+          path: desktop
+
+      - name: Warn when upstream has a newer stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESKTOP_REF: ${{ github.event.inputs.desktop_ref }}
+        run: |
+          set -euo pipefail
+          newest="$(gh api 'repos/nextcloud/desktop/releases?per_page=30' \
+            -q '.[] | select(.draft == false and .prerelease == false) | .tag_name' | sort -V | tail -n1)"
+          if [ "$(printf '%s\n%s\n' "${newest}" "${DESKTOP_REF}" | sort -V | tail -n1)" != "${DESKTOP_REF}" ]; then
+            echo "::warning::Built ${DESKTOP_REF}, but nextcloud/desktop has a newer stable release: ${newest}"
+          else
+            echo "${DESKTOP_REF} is the newest stable nextcloud/desktop release"
+          fi
+
+      - name: Build the source tarball
+        id: tarball
+        env:
+          DESKTOP_REF: ${{ github.event.inputs.desktop_ref }}
+        run: bash platform/clients/make-source-tarball.sh desktop desktop "${DESKTOP_REF}" platform out
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: desktop-${{ github.event.inputs.desktop_ref }}
+          FILE: ${{ steps.tarball.outputs.file }}
+        run: gh release upload "${TAG}" "${FILE}" --clobber -R "${GITHUB_REPOSITORY}"

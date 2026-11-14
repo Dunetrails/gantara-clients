@@ -33,6 +33,8 @@ shipping a Nextcloud mark. Afterwards the whole tree is swept again for survivin
 ```
 clients/desktop/
   README.md                  <- this file
+  COPYING                    <- the client's licence (GPL-2.0), shipped in every package
+  THIRD-PARTY-NOTICES.md     <- bundled libraries and their licences, shipped too
   branding/
     branding.env             <- every name, identifier, URL and Windows GUID
     apply-branding.sh        <- rewrites a checked-out nextcloud/desktop tree
@@ -43,6 +45,8 @@ clients/desktop/
     assets/logo.png          <- the colour star as PNG, for the NSIS installer
     assets/logo.ico          <- the brand app icon for Windows NSIS / shortcuts
 clients/
+  LICENSES/                  <- licence texts the notices cite, by SPDX id
+  make-source-tarball.sh     <- the source tarball attached to every release
   install-appimage.sh        <- per-user install / --uninstall / --purge
   reset-linux-clients.sh     <- wipe all client state from a Linux account
 .github/workflows/
@@ -80,7 +84,8 @@ force-checks-out that clone at the start of every call; the blueprint's `scriptn
 at the copy. The patch adds "Start Gantara" and "Create a desktop shortcut" to the finish
 page.
 
-**Links.** The add-account wizard's server-address hint, its "sign up" and
+**Links.** The add-account wizard's server-address hint (`https://app.gantara.eu`: a
+server address, because the website serves no Nextcloud), its "sign up" and
 "host your own server" buttons, the Client Push link in Settings, the Help menu, and the
 build-revision link in the About dialog. Where a link had no Gantara equivalent it
 points at the site rather than being removed, because removing it would mean removing a
@@ -123,6 +128,15 @@ cannot be translated across the change: languages inflect "Nextcloud" into the s
 and no substitution stays grammatical. Those bodies are cleared, which makes Qt fall back
 to the rebranded English source.
 
+**Licences.** Upstream's packages carry no licence text at all: not the client's GPL, not
+Qt's LGPL, not OpenSSL's Apache licence. `apply-branding.sh` stages
+[`COPYING`](COPYING) (the client's GPL-2.0), [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)
+(every bundled library, its licence and project, and a written offer for the source) and the
+licence texts in [`../LICENSES`](../LICENSES) into the tree, and adds a cmake `install()` rule
+for them: `licenses\` in the install folder on Windows, `usr/share/dunetrails/licenses` in the
+AppImage. Both builds check the files made it into the package. The notices list was taken
+from the v35.0.0 packages; compare it with `bin\*.dll` and `usr/lib` on a major bump.
+
 ## What is deliberately left alone
 
 `verify-branding.sh` treats every remaining "nextcloud" as a failure unless it is
@@ -156,12 +170,18 @@ scripts. None of those is built or installed here.
 
 ## Which upstream version to pin
 
-**`v35.0.0`.** We held at v33.0.7 for a while because v34 reworked the tray, the main
-window and the add-account wizard, and on Linux several of its breakages reproduced with
-upstream's own AppImage. v35 replaces the add-account wizard again (now QML) and moves to
-Qt 6.11; the v33 pin no longer matched the server we host, so the overlay was re-anchored
-on v35.0.0. Re-test the Linux tray and the add-account flow on each new tag before
-handing a build to customers.
+**`v35.0.3`**, with builder image `client-appimage-el9-6.11.2-5`. We held at v33.0.7 for a
+while because v34 reworked the tray, the main window and the add-account wizard, and on Linux
+several of its breakages reproduced with upstream's own AppImage. v35 replaces the add-account
+wizard again (now QML) and moves to Qt 6.11; the v33 pin no longer matched the server we host,
+so the overlay was re-anchored on v35.0.0 and has applied unchanged to the patch releases
+since. Re-test the Linux tray and the add-account flow on each new tag before handing a build
+to customers.
+
+GitHub's "Latest" badge on nextcloud/desktop is not the newest version: upstream also ships
+patch releases of the previous major (v34.0.x), and the most recent one gets the badge. Take
+the highest v35 tag that is not a pre-release. The source job warns when a newer stable tag
+exists than the one built.
 
 Version skew is not the problem it looks like. The client supports every server back to
 20, and an older client against a newer server is the combination upstream expects, since
@@ -178,7 +198,7 @@ it reads the Craft blueprint branches from the tag's own `craftmaster.ini`.
 Actions → **Build: Gantara desktop sync client** → *Run workflow*.
 
 - `platform` — `linux` or `windows` (one per run; default `windows`).
-- `desktop_ref` — the upstream tag to build (default `v35.0.0`).
+- `desktop_ref` — the upstream tag to build (default `v35.0.3`).
 - `builder_image` — Nextcloud's own AppImage build container, as pinned by that tag's
   `.github/workflows/linux-appimage.yml`. Used for Linux. Bump it with the tag.
 - `craft_blueprint_branch` — optional, Windows only. Empty (the default) uses the
@@ -189,22 +209,35 @@ Linux is upstream's `admin/linux/build-appimage.sh`. Windows is KDE Craft via
 `clients/desktop/branding/build-windows.ps1` (same path as upstream's
 `windows-build-and-test.yml`), packaging an unsigned NSIS installer. Both assets attach
 to the same **GitHub Release** (`desktop-<tag>`), which is a browser download and does
-not consume Actions artifact storage.
+not consume Actions artifact storage. After either platform, the `source` job attaches
+`Gantara_Desktop-<version>-source.tar.gz` ([`../make-source-tarball.sh`](../make-source-tarball.sh)):
+the upstream tag as `git archive`d, plus this folder, the shared scripts, the licence texts
+and the workflow at the commit the run built from. The archive is reproducible, so build
+both platforms of a version from the same commit and the second upload is the same file.
 
 This repo is private. Customers download from the public
 [`Dunetrails/gantara-clients`](https://github.com/Dunetrails/gantara-clients) instead:
 `.github/workflows/publish-public-clients.yml` mirrors every `Gantara_*` release asset there
-after a successful build, together with this folder and the upstream tag it was built
-from. That is the source offer the GPL requires for a binary we distribute, so a client
-must not reach customers any other way. The support documentation links to that repo.
-The web interface does not: its client links (`customclient_*`) stay on the upstream
-defaults, the official Nextcloud apps.
+after a successful build, writes a `Gantara_Desktop-<version>-SHA256SUMS.txt` next to them,
+and copies this folder and the licence files into the repo. The source tarball and the
+written offer in the notices are what the GPL requires for a binary we distribute, so a
+client must not reach customers any other way.
+
+`desktop-latest` in the public repo holds the newest version under fixed names
+(`Gantara_Desktop-x64-setup.exe`, `Gantara_Desktop-x86_64.AppImage`,
+`Gantara_Desktop-source.tar.gz`, `Gantara_Desktop-SHA256SUMS.txt`); gantara.eu links there.
+It only moves to a version once that version has both installers and its source tarball,
+so a failed or not-yet-run platform build leaves the previous version in place.
+
+The web interface's client links (`customclient_*`, shown in Personal settings → Mobile &
+desktop) are deliberately left on the upstream defaults, the official Nextcloud apps. The
+website and the support documentation are where Gantara Desktop is offered.
 
 To apply the branding locally without building, run the script against a checkout — it
 needs `bash`, `sed`, and `inkscape` or `rsvg-convert`:
 
 ```bash
-git clone --depth 1 --branch v35.0.0 https://github.com/nextcloud/desktop.git
+git clone --depth 1 --branch v35.0.3 https://github.com/nextcloud/desktop.git
 bash clients/desktop/branding/apply-branding.sh ./desktop
 ```
 
@@ -235,12 +268,12 @@ branded or not, from a Linux account — useful when a test install has left sta
 Download the `.exe` from the GitHub Release and run it. The NSIS installer creates
 Start Menu / Programs entries.
 
-**This build is deliberately unsigned** (Craft `SIGN_PACKAGE=False`; upstream's
-`craftmaster.ini` already ships that). On first launch Windows SmartScreen will
-typically show “Windows protected your PC” → *More info* → *Run anyway*. That is
-expected until Azure Artifact Signing (or another Authenticode cert) is wired into
-the Windows job. Treat the unsigned EXE as internal / test distribution, not a
-customer-facing download.
+**The installer is not code-signed yet** (Craft `SIGN_PACKAGE=False`; upstream's
+`craftmaster.ini` already ships that). It is the customer download all the same: on first
+launch Windows SmartScreen typically shows “Windows protected your PC” → *More info* →
+*Run anyway*, and the website, the public README and the support page say so. Signing with
+Azure Artifact Signing is planned; once it is wired into the Windows job, drop the
+SmartScreen caveat everywhere it is mentioned.
 
 ### Local Windows VM (no Actions)
 
@@ -260,12 +293,42 @@ Tools, and 7-Zip, clones `nextcloud/desktop`, applies branding, and runs Craft/N
 Output: `%USERPROFILE%\dunetrails-desktop-build\desktop-windows-out\`.
 Plan for **50+ GB** free and **1–2 hours** on the first run.
 
+## Release procedure
+
+The client does not update itself (the updater stays compiled out, by decision), so keeping
+customers on a safe version is this procedure. It covers Gantara Talk too
+([`../talk-desktop/README.md`](../talk-desktop/README.md)).
+
+1. **Watch upstream.** [nextcloud/desktop](https://github.com/nextcloud/desktop/releases)
+   and [nextcloud/talk-desktop](https://github.com/nextcloud/talk-desktop/releases) releases,
+   and [Nextcloud's security advisories](https://github.com/nextcloud/security-advisories/security/advisories).
+   **Rebuild within a week of any upstream release that fixes a security issue**; other patch
+   releases can wait for the next planned build.
+2. **Bump and build.** Set the new tag as the workflow default (`desktop_ref`, plus
+   `builder_image` from the tag's `linux-appimage.yml`), commit, then run the build for
+   `linux` and for `windows` from that commit. Each run attaches its package and the source
+   tarball; a failing anchor in `apply-branding.sh` means upstream moved a string.
+3. **Check the release.** In the public repo: the versioned release has both installers, the
+   source tarball and the SHA256SUMS file, and `desktop-latest` shows the new version in its
+   title. Install it once on Windows and Linux and add an account.
+4. **Tell the users.** The client cannot, so announce it on every tenant from the server.
+   The [Announcement Center](https://apps.nextcloud.com/apps/announcementcenter) app
+   (7.5.1 supports Nextcloud 35) is the tool for this: one
+   `occ announcementcenter:announce <admin> "<subject>" "<message>" --notifications --activities`
+   reaches every user of the tenant, with a notification and an activity entry, optionally an
+   email, and can be scheduled and expired. It is **not installed today**: it has to be added
+   to the image's `APPS` and to the plans' app lists before it can be enabled. Until then the
+   fallback is the notifications app, which every tenant has but which only notifies one
+   user per call — loop it over `occ user:list`, with the same `--object-type`/`--object-id`
+   on every call so the next release's notice replaces this one:
+   `occ notification:generate <user> "Gantara Desktop <version> is available" -l "Download it from https://gantara.eu/download" --object-type=client-release --object-id=desktop`.
+
 ## Limitations
 
-- **x86_64 Linux AppImage + unsigned Windows NSIS.** No Authenticode cert yet;
-  SmartScreen will warn. No macOS package (needs a Developer ID and notarisation).
-  WiX MSI can come later; Craft currently emits NSIS.
+- **x86_64 Linux AppImage + Windows NSIS, not code-signed yet.** SmartScreen warns until
+  Azure Artifact Signing is wired in. No macOS package (needs a Developer ID and
+  notarisation). WiX MSI can come later; Craft currently emits NSIS.
 - **No updates.** The updater is compiled out, so a new version means a new build here and
-  a new file for the user. There is no appcast to point it at.
+  a new file for the user; see [Release procedure](#release-procedure).
 - Synced files are never touched by any of these scripts, including `--purge`. Saved
   passwords live in the system keyring.

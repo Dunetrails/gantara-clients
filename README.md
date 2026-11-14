@@ -13,12 +13,16 @@ Click a link to download the newest version:
 | **Gantara Talk** — chat and calls, on plans that include them | [Download for Windows](https://github.com/Dunetrails/gantara-clients/releases/download/talk-latest/Gantara_Talk-x64-setup.exe) | [Download for Linux](https://github.com/Dunetrails/gantara-clients/releases/download/talk-latest/Gantara_Talk-x86_64.AppImage) |
 
 Earlier versions are on the [Releases page](https://github.com/Dunetrails/gantara-clients/releases).
+Every release lists SHA-256 checksums of its files
+([Desktop](https://github.com/Dunetrails/gantara-clients/releases/download/desktop-latest/Gantara_Desktop-SHA256SUMS.txt),
+[Talk](https://github.com/Dunetrails/gantara-clients/releases/download/talk-latest/Gantara_Talk-SHA256SUMS.txt)
+for the newest version).
 
 When the application asks for a server address, enter the address you use in your browser, for
 example `https://app.gantara.eu`.
 
-**Windows:** the installers are not signed yet. Windows may show "Windows protected your PC"; choose
-*More info*, then *Run anyway*.
+**Windows:** the installers are not code-signed yet; signing is planned. Until then Windows
+SmartScreen may show "Windows protected your PC"; choose *More info*, then *Run anyway*.
 
 **Linux:** make the AppImage executable (`chmod +x Gantara_*.AppImage`) and run it.
 
@@ -32,10 +36,16 @@ build of the Nextcloud Talk desktop client. They are **not** official Nextcloud 
 provided or endorsed by Nextcloud GmbH. The changes are limited to the name, the artwork, links,
 and the Linux fixes described in the folders below.
 
+The applications do not update themselves. We publish a new version within a week of any
+upstream release that fixes a security issue, and announce it in Gantara.
+
 ## Source code
 
-Each release is built from an unmodified upstream tag plus the files in this repository. The
-release notes name the upstream tag.
+Each release is built from an unmodified upstream tag plus the files in this repository, and has
+its complete source attached as `Gantara_<Application>-<version>-source.tar.gz`
+([Desktop](https://github.com/Dunetrails/gantara-clients/releases/download/desktop-latest/Gantara_Desktop-source.tar.gz),
+[Talk](https://github.com/Dunetrails/gantara-clients/releases/download/talk-latest/Gantara_Talk-source.tar.gz)
+for the newest version). The release notes name the upstream tag.
 
 | Folder | What it is | Upstream |
 |--|--|--|
@@ -52,6 +62,8 @@ To rebuild a release: check out the upstream tag named in its release notes, run
 The upstream programs keep their own licences: the Nextcloud desktop client is GPL-2.0-or-later,
 the Talk desktop client and the Nextcloud server and apps are AGPL-3.0-or-later. The scripts and
 patches in this repository are published under the same licence as the program they modify.
+Which part is under which licence, and where the full texts and third-party notices are:
+[LICENSING.md](LICENSING.md).
 
 The Gantara name and logo are trademarks of Dunetrails BV and are not covered by these licences.
 Nextcloud and the Nextcloud logo are registered trademarks of Nextcloud GmbH.

@@ -25,7 +25,7 @@
 [CmdletBinding()]
 param(
     [string]$Workspace = $(Join-Path $env:USERPROFILE "dunetrails-desktop-build"),
-    [string]$DesktopRef = "v35.0.0",
+    [string]$DesktopRef = "v35.0.3",
     # Empty: use the blueprint branches pinned in the tag's craftmaster.ini.
     [string]$CraftBlueprintBranch = "",
     [string]$PlatformRepo = "https://github.com/Dunetrails/k8s-platform-ovh.git",

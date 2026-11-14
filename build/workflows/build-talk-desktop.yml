@@ -9,6 +9,9 @@ name: "Build: Gantara Talk desktop client"
 # Outputs:
 #   - Linux: single-file AppImage (electron-forge zip tree wrapped via appimagetool,
 #     with self-integrating AppRun for the applications menu).
+#   - Both: Gantara_Talk-<version>-source.tar.gz (clients/make-source-tarball.sh), the
+#     corresponding source of the packages including the bundled Talk web app,
+#     attached by the source job.
 #   - Windows: unsigned Squirrel setup .exe (Start Menu / Programs via the installer).
 #     Signing is deliberately OFF — WINDOWS_SIGN_PARAMS is forced empty. SmartScreen
 #     will warn on first run; Azure Artifact Signing / a cert can be wired later.
@@ -42,7 +45,7 @@ on:
       talk_desktop_ref:
         description: "nextcloud/talk-desktop git tag to build from."
         required: true
-        default: "v2.3.3"
+        default: "v2.3.4"
       channel:
         description: "Release channel compiled into the app: stable, beta or dev. (Since v2.3 the bundled Talk is fixed by the tag.)"
         required: true
@@ -214,6 +217,9 @@ jobs:
           $ErrorActionPreference = "Stop"
           $exes = @(Get-ChildItem -Path "talk-desktop\out\make\squirrel.windows" -Recurse -Filter *.exe -ErrorAction SilentlyContinue)
           if ($exes.Count -eq 0) { throw "Squirrel produced no .exe under talk-desktop/out/make/squirrel.windows" }
+          $licenses = @(Get-ChildItem -Path "talk-desktop\out" -Directory -Filter "*-win32-*" -ErrorAction SilentlyContinue |
+            Where-Object { Test-Path (Join-Path $_.FullName "resources\licenses\LICENSE") })
+          if ($licenses.Count -eq 0) { throw "resources\licenses missing from the packaged app (forge extraResource patch not applied?)" }
           $nextcloud = @($exes | Where-Object { $_.Name -match '(?i)nextcloud' })
           if ($nextcloud.Count -gt 0) {
             throw "Nextcloud-named installer survived branding: $($nextcloud.Name -join ', ')"
@@ -237,3 +243,55 @@ jobs:
           files: talk-desktop-windows-out/*.exe
           fail_on_unmatched_files: true
           make_latest: false
+
+  # Runs after whichever platform was built, so the release it attaches to exists.
+  # The tarball only depends on the commits, so a Linux and a Windows run from the
+  # same commit upload identical bytes.
+  source:
+    name: Attach the source tarball
+    needs: [linux, windows]
+    if: always() && (needs.linux.result == 'success' || needs.windows.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # uploads to the release
+    steps:
+      - name: Checkout talk-desktop at pinned tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          repository: nextcloud/talk-desktop
+          ref: ${{ github.event.inputs.talk_desktop_ref }}
+          path: talk-desktop
+
+      - name: Checkout platform repo (branding overlay)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: platform
+
+      - name: Warn when upstream has a newer stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TALK_REF: ${{ github.event.inputs.talk_desktop_ref }}
+        run: |
+          set -euo pipefail
+          newest="$(gh api 'repos/nextcloud/talk-desktop/releases?per_page=30' \
+            -q '.[] | select(.draft == false and .prerelease == false) | .tag_name' | sort -V | tail -n1)"
+          if [ "$(printf '%s\n%s\n' "${newest}" "${TALK_REF}" | sort -V | tail -n1)" != "${TALK_REF}" ]; then
+            echo "::warning::Built ${TALK_REF}, but nextcloud/talk-desktop has a newer stable release: ${newest}"
+          else
+            echo "${TALK_REF} is the newest stable nextcloud/talk-desktop release"
+          fi
+
+      - name: Build the source tarball
+        id: tarball
+        env:
+          TALK_REF: ${{ github.event.inputs.talk_desktop_ref }}
+        run: bash platform/clients/make-source-tarball.sh talk-desktop talk-desktop "${TALK_REF}" platform out
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: talk-desktop-${{ github.event.inputs.talk_desktop_ref }}
+          FILE: ${{ steps.tarball.outputs.file }}
+        run: gh release upload "${TAG}" "${FILE}" --clobber -R "${GITHUB_REPOSITORY}"

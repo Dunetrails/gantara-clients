@@ -243,6 +243,13 @@ patch(
     r"(export async function checkForUpdate\([^)]*\): Promise<ReleaseInfo \| null> \{)\r?\n",
     r"\1\n\tif (BUILD_CONFIG.isBranded) {\n\t\treturn null\n\t}\n",
 )
+# The daily release check: up to v2.3.3 main.js only started it for unbranded
+# builds; v2.3.4 starts it unconditionally. Stop it at the source.
+patch(
+    "src/app/githubRelease.service.ts",
+    r"(export function setupReleaseNotificationScheduler\([^)]*\) \{)\r?\n",
+    r"\1\n\tif (BUILD_CONFIG.isBranded) { // branded: no release polling\n\t\treturn\n\t}\n",
+)
 patch(
     "src/talk/renderer/TitleBar/components/MainMenu.vue",
     r"(onBeforeMount\(async \(\) => \{\r?\n)[ \t]*newRelease\.value = await window\.TALK_DESKTOP\.checkForUpdate\(\)",
@@ -265,6 +272,15 @@ patch(
     "src/help/renderer/HelpApp.vue",
     r'(<a :href="packageInfo\.bugs\.url"[\s\S]*?</a>\s*\|\s*<a :href="packageInfo\.repository"[\s\S]*?</a>)',
     r'<template v-if="!BUILD_CONFIG.isBranded">\1</template>',
+)
+
+# Licences: electron-packager copies each extraResource into resources/ of the
+# packaged app, which both the Linux zip (wrapped into the AppImage) and the
+# Squirrel package are made from. The folder is staged by step 6 below.
+patch(
+    "forge.config.js",
+    r"(packagerConfig: \{[\s\S]*?\n([ \t]*)asar: true,\r?\n)",
+    r"\1\2extraResource: [path.join(__dirname, '.overrides', 'licenses')],\n",
 )
 
 # Squirrel.Windows downloads iconUrl for Add/Remove Programs. Upstream hard-codes
@@ -576,5 +592,18 @@ EOF
 else
   echo "    - no pre-generated theme styles committed; build will extract them via Docker" >&2
 fi
+
+# 6. Licences and notices, shipped in resources/licenses of the packaged app (see the
+#    forge.config.js extraResource patch above). Upstream's packages carry Electron's
+#    LICENSE and Chromium's notices but not the app's own AGPL text.
+TALK_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LICENSES_DIR="$(cd "${SCRIPT_DIR}/../../LICENSES" && pwd)"
+for f in "${TALK_DIR}/LICENSE" "${TALK_DIR}/THIRD-PARTY-NOTICES.md"; do
+  [ -f "${f}" ] || { echo "error: licence file missing: ${f}" >&2; exit 1; }
+done
+mkdir -p "${SRC}/.overrides/licenses/LICENSES"
+cp -f "${TALK_DIR}/LICENSE" "${TALK_DIR}/THIRD-PARTY-NOTICES.md" "${SRC}/.overrides/licenses/"
+cp -f "${LICENSES_DIR}"/*.txt "${SRC}/.overrides/licenses/LICENSES/"
+echo "    - staged .overrides/licenses (LICENSE, THIRD-PARTY-NOTICES.md, $(ls "${SRC}/.overrides/licenses/LICENSES" | wc -l | tr -d ' ') licence texts)"
 
 echo "==> Branding files staged. Run 'npm run generate-icons' then the release build."

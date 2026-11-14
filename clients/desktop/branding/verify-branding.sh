@@ -58,6 +58,16 @@ expect_in_file NEXTCLOUD.cmake "set( WIN_MSI_UPGRADE_CODE                \"${WIN
     "Windows MSI UpgradeCode overridden"
 expect_in_file CMakeLists.txt "set( CFAPI_SHELLEXT_APPID_REG \"${CFAPI_SHELLEXT_APPID_REG}\")" \
     "Windows CfApi AppId GUID overridden"
+expect_in_file CMakeLists.txt 'install(DIRECTORY "${CMAKE_SOURCE_DIR}/gantara-licenses/"' \
+    "licences and notices installed with the client"
+expect_in_file gantara-licenses/COPYING "GNU GENERAL PUBLIC LICENSE" \
+    "client licence (GPL) staged"
+expect_in_file gantara-licenses/THIRD-PARTY-NOTICES.md "Written offer" \
+    "third-party notices staged"
+expect_in_file gantara-licenses/LICENSES/LGPL-3.0-or-later.txt "GNU LESSER GENERAL PUBLIC LICENSE" \
+    "Qt's licence (LGPL-3.0) staged"
+expect_in_file gantara-licenses/LICENSES/Apache-2.0.txt "Apache License" \
+    "OpenSSL's licence (Apache-2.0) staged"
 
 # Identities that upstream derives from the display name, pinned to the short
 # name so renaming the product does not orphan existing installs.

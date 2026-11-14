@@ -58,15 +58,28 @@ with `appimagetool`.
 
 Actions → **Build: Gantara Talk desktop client** → *Run workflow*.
 Inputs: `platform` (`linux` or `windows`), `talk_desktop_ref` (upstream tag, default
-`v2.3.3`), and `channel` (`stable`/`beta`/`dev`, the release channel compiled into the
-app; since v2.3 the bundled Talk version is fixed by the tag). Installers are attached to
-a **GitHub Release** `talk-desktop-<ref>`. They do not count toward Actions storage.
-This repo is private; customers download from the public
+`v2.3.4`, which bundles Talk v25.0.7), and `channel` (`stable`/`beta`/`dev`, the release
+channel compiled into the app; since v2.3 the bundled Talk version is fixed by the tag).
+Installers are attached to a **GitHub Release** `talk-desktop-<ref>`. They do not count
+toward Actions storage. After either platform, the `source` job attaches
+`Gantara_Talk-<version>-source.tar.gz` ([`../make-source-tarball.sh`](../make-source-tarball.sh)):
+the talk-desktop tag, the nextcloud/spreed tag its `package.json` bundles, and this folder
+with the shared scripts and workflows at the commit the run built from. Build both platforms
+of a version from the same commit. This repo is private; customers download from the public
 [`Dunetrails/gantara-clients`](https://github.com/Dunetrails/gantara-clients), where
-`publish-public-clients.yml` mirrors each release after its build (see the compliance
-checklist below).
+`publish-public-clients.yml` mirrors each release after its build, with a SHA256SUMS file
+(see the compliance checklist below). `talk-latest` there only moves to a version once it
+has both installers and the source tarball. Release cadence and how users hear about a new
+version: [Release procedure](../desktop/README.md#release-procedure).
 
-**Windows needs current committed styles.** v2.3.3 bundles Talk v25, which themes itself
+**Licences.** `apply-branding.sh` stages [`LICENSE`](LICENSE) (AGPL-3.0),
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) and the licence texts in
+[`../LICENSES`](../LICENSES) into `.overrides/licenses`, and patches `forge.config.js` to
+package that folder as an `extraResource`, so every package carries it in
+`resources/licenses` next to Electron's `LICENSE` and `LICENSES.chromium.html`. Both builds
+fail if it is missing.
+
+**Windows needs current committed styles.** v2.3.x bundles Talk v25, which themes itself
 from Nextcloud 35 styles; the committed `styles/34` no longer match. Run
 **refresh-talk-styles** once (after pushing this branch, before a Windows build) — the
 Windows job checks and stops with that instruction otherwise. Linux extracts them itself
@@ -185,7 +198,7 @@ the shared installer does that and also cleans up:
 The bundled `AppRun` launches Electron with `--no-sandbox` (an AppImage is a read-only FUSE
 mount, so Chromium's SUID sandbox helper can't be used).
 
-## Installing the Windows setup (unsigned)
+## Installing the Windows setup (not code-signed yet)
 
 Download the `.exe` from the GitHub Release and run it. The Squirrel installer creates
 Start Menu / Programs entries (no separate desktop-integration step). The setup
@@ -195,11 +208,11 @@ notification identity keep the "Dunetrails Talk" identity, so an update over an 
 install keeps the login. Squirrel's update hook removes the old "Dunetrails Talk"
 Start-menu folder and desktop shortcut.
 
-**This build is deliberately unsigned** (`WINDOWS_SIGN_PARAMS` is forced empty). On first launch Windows
-SmartScreen will typically show “Windows protected your PC” → *More info* → *Run anyway*.
-That is expected until Azure Artifact Signing (or another Authenticode cert) is wired into
-the Windows job. Treat the unsigned EXE as internal / test distribution, not a customer-facing
-download.
+**The installer is not code-signed yet** (`WINDOWS_SIGN_PARAMS` is forced empty). It is the
+customer download all the same: on first launch Windows SmartScreen typically shows “Windows
+protected your PC” → *More info* → *Run anyway*, and the website and the public README say
+so. Signing with Azure Artifact Signing is planned; once it is wired into the Windows job,
+drop the SmartScreen caveat everywhere it is mentioned.
 
 **No auto-update.** The hamburger has no Update item, the client does not poll
 `nextcloud-releases`, and Squirrel's `RELEASES` / `.nupkg` feed is not published.
@@ -210,7 +223,7 @@ macOS / Flatpak remain off.
 
 ## Deliberate scope of this pipeline
 
-- **Linux AppImage + Windows Squirrel EXE (unsigned, no auto-update).** `windowsExe` is `true` in
+- **Linux AppImage + Windows Squirrel EXE (not code-signed yet, no auto-update).** `windowsExe` is `true` in
   `build.config.json`; `windowsMsi`, `macosDmg` and `linuxFlatpak` stay `false` (the Linux
   `.zip` maker stays enabled — the AppImage is built from the app tree it produces). Signing
   is off (`WINDOWS_SIGN_PARAMS` empty). Flatpak is skipped to avoid `flatpak-builder` in CI.

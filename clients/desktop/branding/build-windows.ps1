@@ -443,6 +443,12 @@ if ($sevenZipPath) {
         throw "installer payload missing bin\$AppExe.exe (blacklist likely still stripping it)"
     }
     Write-Host "    ok: bin\$AppExe.exe present in payload"
+    foreach ($licenseFile in @("licenses\COPYING", "licenses\THIRD-PARTY-NOTICES.md", "licenses\LICENSES\LGPL-3.0-or-later.txt")) {
+        if ($listing -notmatch [regex]::Escape($licenseFile) -and $listing -notmatch [regex]::Escape($licenseFile.Replace('\', '/'))) {
+            throw "installer payload missing $licenseFile (apply-branding.sh install rule not applied?)"
+        }
+    }
+    Write-Host "    ok: licences and notices present in payload"
 } else {
     Write-Host "==> Skipping payload exe verification (7z/7za not found)"
 }

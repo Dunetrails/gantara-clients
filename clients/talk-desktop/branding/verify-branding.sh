@@ -79,7 +79,7 @@ expect_in_file package.json '"desktopName": "dunetrails-talk"' \
 # Auto-update: branded builds must not poll nextcloud-releases or GitHub.
 expect_in_file src/app/githubRelease.service.ts 'if (BUILD_CONFIG.isBranded)' \
   "checkForUpdate short-circuits on branded builds"
-expect_in_file src/main.js '!BUILD_CONFIG.isBranded' \
+expect_in_file src/app/githubRelease.service.ts 'if (BUILD_CONFIG.isBranded) { // branded: no release polling' \
   "release-notification scheduler stays off for branded builds"
 forbid_in_file src/authentication/renderer/AuthenticationApp.vue 'try.nextcloud.com' \
   "login placeholder is not try.nextcloud.com"
@@ -99,6 +99,14 @@ expect_in_file forge.config.js 'https://gantara.eu/talk-desktop/icon.ico' \
   "Squirrel iconUrl points at gantara.eu"
 expect_in_file forge.config.js 'signWithParams: hasWindowsSign && process.env.WINDOWS_SIGN_PARAMS' \
   "Authenticode still gated on WINDOWS_SIGN_PARAMS (unset = unsigned)"
+
+# Licences ship in resources/licenses of every package.
+expect_in_file forge.config.js "extraResource: [path.join(__dirname, '.overrides', 'licenses')]" \
+  "licences folder packaged as an extra resource"
+expect_in_file .overrides/licenses/LICENSE 'GNU AFFERO GENERAL PUBLIC LICENSE' \
+  "app licence (AGPL) staged"
+expect_in_file .overrides/licenses/THIRD-PARTY-NOTICES.md 'Written offer' \
+  "third-party notices staged"
 
 if [ -f img/squirrel-install-loading.gif ] && [ -f "${SCRIPT_DIR}/assets/squirrel-install-loading.gif" ]; then
   if cmp -s img/squirrel-install-loading.gif "${SCRIPT_DIR}/assets/squirrel-install-loading.gif"; then

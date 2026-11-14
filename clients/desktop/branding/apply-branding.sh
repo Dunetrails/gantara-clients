@@ -353,13 +353,22 @@ printf '    admin/win/nsi/installer.ico (NSIS / setup icon)\n'
 step "AppImage build script"
 # --------------------------------------------------------------------------
 # We build with upstream's own admin/linux/build-appimage.sh. The icon is
-# installed as <APPLICATION_ICON_NAME>.png, but the script hands linuxdeploy the
-# name hardcoded, and its two brand defaults would otherwise decide the
-# AppImage's name and its bundled data directory whenever the environment does
-# not override them.
-rewrite "${DESKTOP}/admin/linux/build-appimage.sh" \
-    "usr/share/icons/hicolor/512x512/apps/Nextcloud.png" \
-    "usr/share/icons/hicolor/512x512/apps/${APPLICATION_ICON_NAME}.png"
+# installed as <APPLICATION_ICON_NAME>.png. Up to v35.0.0 the script hands
+# linuxdeploy the name hardcoded; from v35.0.1 it reads it from the .desktop
+# entry (admin/linux/resolve-appimage-icon.sh), which the cmake overrides
+# already name. Its two brand defaults would otherwise decide the AppImage's
+# name and its bundled data directory whenever the environment does not
+# override them.
+if grep -qF "usr/share/icons/hicolor/512x512/apps/Nextcloud.png" "${DESKTOP}/admin/linux/build-appimage.sh"; then
+    rewrite "${DESKTOP}/admin/linux/build-appimage.sh" \
+        "usr/share/icons/hicolor/512x512/apps/Nextcloud.png" \
+        "usr/share/icons/hicolor/512x512/apps/${APPLICATION_ICON_NAME}.png"
+else
+    need_file "${DESKTOP}/admin/linux/resolve-appimage-icon.sh"
+    grep -qF 'resolve-appimage-icon.sh' "${DESKTOP}/admin/linux/build-appimage.sh" \
+        || die "build-appimage.sh neither hardcodes the AppImage icon nor resolves it from the .desktop entry (upstream changed how it picks the icon?)"
+    printf '    admin/linux/build-appimage.sh: icon resolved from the .desktop entry (nothing to rewrite)\n'
+fi
 rewrite "${DESKTOP}/admin/linux/build-appimage.sh" \
     'export APPNAME=${APPNAME:-Nextcloud}' \
     "export APPNAME=\${APPNAME:-${APPLICATION_NAME}}"
@@ -378,8 +387,17 @@ rewrite "${DESKTOP}/src/libsync/nextcloudtheme.cpp" \
     "https://try.nextcloud.com" "${APPLICATION_WIZARD_URL_HINT}"
 
 # Add-account wizard: "Sign up with a provider" and "Host your own server".
-rewrite "${DESKTOP}/src/gui/wizard/accountwizardcontroller.cpp" \
-    "https://nextcloud.com/sign-up/?flow=V3" "${BRAND_SIGNUP_URL}"
+# The sign-up link lived in the wizard controller up to v35.0.0 and moved to
+# the theme in v35.0.1. Exactly one of them must carry it.
+signup_hits=0
+for f in src/gui/wizard/accountwizardcontroller.cpp src/libsync/theme.cpp; do
+    if grep -qF "https://nextcloud.com/sign-up/?flow=V3" "${DESKTOP}/${f}"; then
+        rewrite "${DESKTOP}/${f}" "https://nextcloud.com/sign-up/?flow=V3" "${BRAND_SIGNUP_URL}"
+        signup_hits=$((signup_hits + 1))
+    fi
+done
+[ "${signup_hits}" -eq 1 ] \
+    || die "expected the sign-up link in exactly one of accountwizardcontroller.cpp / theme.cpp, found ${signup_hits}"
 rewrite "${DESKTOP}/src/gui/wizard/accountwizardcontroller.cpp" \
     "https://docs.nextcloud.com/server/latest/admin_manual/installation/#installation" \
     "${BRAND_SITE_URL}"
@@ -469,6 +487,38 @@ rewrite "${DESKTOP}/theme/Style/Style.qml" \
     "Qt.rgba(0, 0.51, 0.79, 0.1)" "Qt.rgba(${BRAND_RGB}, 0.1)"
 rewrite "${DESKTOP}/theme/Style/Style.qml" \
     "Qt.rgba(0, 0.51, 0.79, 1)" "Qt.rgba(${BRAND_RGB}, 1)"
+
+# --------------------------------------------------------------------------
+step "Licences and notices"
+# --------------------------------------------------------------------------
+# Upstream's packages carry no licence text: not the client's GPL, not Qt's
+# LGPL, not OpenSSL's Apache licence. The GPL and LGPL require one with every
+# copy, so the client's COPYING, the third-party notices and the licence texts
+# they cite are installed with the client: into share/<executable>/licenses on
+# Linux (build-appimage.sh moves share/<executable> into the AppImage) and
+# licenses\ beside bin\ on Windows (Craft packages the whole install prefix;
+# its blacklist does not touch that folder).
+CLIENT_DIR="$(cd -- "${BRANDING_DIR}/.." && pwd)"
+LICENSES_DIR="$(cd -- "${BRANDING_DIR}/../../LICENSES" && pwd)"
+LICENSE_STAGE="${DESKTOP}/gantara-licenses"
+for f in "${CLIENT_DIR}/COPYING" "${CLIENT_DIR}/THIRD-PARTY-NOTICES.md"; do
+    [ -f "${f}" ] || die "missing licence file: ${f}"
+done
+mkdir -p "${LICENSE_STAGE}/LICENSES"
+cp "${CLIENT_DIR}/COPYING" "${CLIENT_DIR}/THIRD-PARTY-NOTICES.md" "${LICENSE_STAGE}/"
+cp "${LICENSES_DIR}"/*.txt "${LICENSE_STAGE}/LICENSES/"
+cat >>"${DESKTOP}/CMakeLists.txt" <<'EOF'
+
+# ---- Gantara licences and notices (clients/desktop/branding/apply-branding.sh)
+if(WIN32)
+    set(GANTARA_LICENSE_DIR "licenses")
+else()
+    set(GANTARA_LICENSE_DIR "${CMAKE_INSTALL_DATADIR}/${APPLICATION_EXECUTABLE}/licenses")
+endif()
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/gantara-licenses/" DESTINATION "${GANTARA_LICENSE_DIR}")
+EOF
+printf '    staged %s licence texts and the notices in gantara-licenses/\n' \
+    "$(find "${LICENSE_STAGE}/LICENSES" -name '*.txt' | wc -l | tr -d ' ')"
 
 # --------------------------------------------------------------------------
 step "Verifying"

@@ -48,6 +48,8 @@ if [ -z "${PKG_DIR}" ]; then
   [ -n "${PKG_DIR}" ] || PKG_DIR="${EXTRACT}"
 fi
 echo "==> packaged app dir: ${PKG_DIR}"
+[ -f "${PKG_DIR}/resources/licenses/LICENSE" ] && [ -f "${PKG_DIR}/resources/licenses/THIRD-PARTY-NOTICES.md" ] \
+  || { echo "error: resources/licenses missing from the packaged app (forge extraResource patch not applied?)" >&2; exit 1; }
 
 # 2. Identify the main Electron binary: the executable at the tree root that is
 #    neither a shared lib nor one of Chromium's helper binaries.
