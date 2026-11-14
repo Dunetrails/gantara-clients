@@ -128,5 +128,7 @@ wget -qO "${TOOL}" "${APPIMAGETOOL_URL}"
 chmod +x "${TOOL}"
 
 OUTFILE="${OUT_DIR}/Gantara_Talk-${ARCH}.AppImage"
+# mktemp dirs are 0700; appimagetool refuses an AppDir other users can't read.
+chmod -R a+rX "${APPDIR}"
 ARCH="${ARCH}" "${TOOL}" --appimage-extract-and-run "${APPDIR}" "${OUTFILE}"
 echo "==> built ${OUTFILE}"

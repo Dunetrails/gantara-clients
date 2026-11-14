@@ -274,6 +274,8 @@ fi
 chmod +x "${TOOL}"
 
 TMP_OUT="$(mktemp -d)/repacked.AppImage"
+# appimagetool refuses directories other users can't read (the extractor can leave 0700).
+chmod -R a+rX "${APPDIR}"
 ARCH="${ARCH}" "${TOOL}" --appimage-extract-and-run "${APPDIR}" "${TMP_OUT}"
 mkdir -p "$(dirname "${OUT}")"
 mv -f "${TMP_OUT}" "${OUT}"
