@@ -84,7 +84,10 @@ RUN set -eux; \
 #     changes without a PHP restart — which is exactly the deploy model here (pods are recreated on any
 #     image change), so it is safe. Do NOT set this on a mutable/PVC webroot.
 #   - apcu on CLI: memcache.local => APCu is a no-op under the CLI SAPI (cron sidecar, migrate Job,
-#     preview:pre-generate CronJob) without this. JIT intentionally left off.
+#     preview:pre-generate CronJob) without this.
+#   - opcache.jit=off + jit_buffer_size=0: the base's opcache-recommended.ini turns the tracing JIT ON
+#     (jit=1255, 8M buffer). JIT is the likeliest cause of a corrupted opcache (HTTP 500 until a
+#     php-fpm reload) and gains little for Nextcloud; the opcache itself stays enabled.
 RUN set -eux; \
     mkdir -p /usr/local/etc/php/conf.d; \
     printf '%s\n' \
@@ -93,6 +96,8 @@ RUN set -eux; \
       'opcache.memory_consumption=256' \
       'opcache.revalidate_freq=60' \
       'opcache.validate_timestamps=0' \
+      'opcache.jit=off' \
+      'opcache.jit_buffer_size=0' \
       > /usr/local/etc/php/conf.d/zz-opcache-overrides.ini; \
     printf '%s\n' 'apc.enable_cli=1' > /usr/local/etc/php/conf.d/zz-apcu-cli.ini; \
     # Nextcloud never uses session upload progress (it does its own chunked uploads); disabling
