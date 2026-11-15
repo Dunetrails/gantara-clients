@@ -198,7 +198,7 @@ the shared installer does that and also cleans up:
 The bundled `AppRun` launches Electron with `--no-sandbox` (an AppImage is a read-only FUSE
 mount, so Chromium's SUID sandbox helper can't be used).
 
-## Installing the Windows setup (not code-signed yet)
+## Installing the Windows setup
 
 Download the `.exe` from the GitHub Release and run it. The Squirrel installer creates
 Start Menu / Programs entries (no separate desktop-integration step). The setup
@@ -208,11 +208,17 @@ notification identity keep the "Dunetrails Talk" identity, so an update over an 
 install keeps the login. Squirrel's update hook removes the old "Dunetrails Talk"
 Start-menu folder and desktop shortcut.
 
-**The installer is not code-signed yet** (`WINDOWS_SIGN_PARAMS` is forced empty). It is the
-customer download all the same: on first launch Windows SmartScreen typically shows “Windows
-protected your PC” → *More info* → *Run anyway*, and the website and the public README say
-so. Signing with Azure Artifact Signing is planned; once it is wired into the Windows job,
-drop the SmartScreen caveat everywhere it is mentioned.
+**Code signing.** Once the repo variables in
+[`docs/runbooks/windows-code-signing.md`](../../docs/runbooks/windows-code-signing.md) are
+set, the Windows job sets `WINDOWS_SIGN_PARAMS` to `signtool` arguments for the Azure
+Artifact Signing dlib ([`../windows-signing.ps1`](../windows-signing.ps1) installs it).
+Upstream's forge config hands them to `@electron/windows-sign` for the packaged app and to
+Squirrel for `Update.exe` and the setup; the job swaps electron-winstaller's 2014
+`signtool.exe` for the SDK's, which can load the dlib, and verifies the setup and the whole
+nupkg afterwards. Until then the installer is unsigned and Windows SmartScreen shows
+“Windows protected your PC” → *More info* → *Run anyway*. Each Windows build writes
+`Gantara_Talk-<version>-signing.json`; the release notes and gantara.eu/download show the
+SmartScreen hint only while it says unsigned.
 
 **No auto-update.** The hamburger has no Update item, the client does not poll
 `nextcloud-releases`, and Squirrel's `RELEASES` / `.nupkg` feed is not published.
@@ -223,10 +229,10 @@ macOS / Flatpak remain off.
 
 ## Deliberate scope of this pipeline
 
-- **Linux AppImage + Windows Squirrel EXE (not code-signed yet, no auto-update).** `windowsExe` is `true` in
+- **Linux AppImage + Windows Squirrel EXE (no auto-update).** `windowsExe` is `true` in
   `build.config.json`; `windowsMsi`, `macosDmg` and `linuxFlatpak` stay `false` (the Linux
-  `.zip` maker stays enabled — the AppImage is built from the app tree it produces). Signing
-  is off (`WINDOWS_SIGN_PARAMS` empty). Flatpak is skipped to avoid `flatpak-builder` in CI.
+  `.zip` maker stays enabled — the AppImage is built from the app tree it produces). Windows
+  signing as above. Flatpak is skipped to avoid `flatpak-builder` in CI.
 - **In-app theming is ON, and builds are Docker-free when the styles are current.**
   `build.config.json` sets `primaryColor`/`backgroundColor` to the Gantara blue
   (`#31469D`, the platform theme's primary), which flips

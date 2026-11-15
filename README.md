@@ -16,13 +16,15 @@ Earlier versions are on the [Releases page](https://github.com/Dunetrails/gantar
 Every release lists SHA-256 checksums of its files
 ([Desktop](https://github.com/Dunetrails/gantara-clients/releases/download/desktop-latest/Gantara_Desktop-SHA256SUMS.txt),
 [Talk](https://github.com/Dunetrails/gantara-clients/releases/download/talk-latest/Gantara_Talk-SHA256SUMS.txt)
-for the newest version).
+for the newest version), and the checksum file is signed. How to check a download:
+[SIGNING.md](SIGNING.md).
 
 When the application asks for a server address, enter the address you use in your browser, for
 example `https://app.gantara.eu`.
 
-**Windows:** the installers are not code-signed yet; signing is planned. Until then Windows
-SmartScreen may show "Windows protected your PC"; choose *More info*, then *Run anyway*.
+**Windows:** until the installers are code-signed, Windows SmartScreen may show "Windows
+protected your PC"; choose *More info*, then *Run anyway*. Each release says whether its Windows
+installer is signed.
 
 **Linux:** make the AppImage executable (`chmod +x Gantara_*.AppImage`) and run it.
 

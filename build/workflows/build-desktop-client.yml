@@ -11,18 +11,20 @@ name: "Build: Gantara desktop sync client"
 #
 # Outputs:
 #   - Linux: AppImage via upstream admin/linux/build-appimage.sh
-#   - Windows: unsigned NSIS installer via KDE Craft (same toolchain as
-#     upstream windows-build-and-test.yml). SIGN_PACKAGE stays false —
-#     SmartScreen will warn until a cert is wired later.
+#   - Windows: NSIS installer via KDE Craft (same toolchain as upstream
+#     windows-build-and-test.yml), plus Gantara_Desktop-<version>-signing.json
+#     saying whether it is Authenticode-signed. Signed with Azure Artifact
+#     Signing once the repo variables in SIGNING.md are set, unsigned until then.
 #   - Both: Gantara_Desktop-<version>-source.tar.gz (clients/make-source-tarball.sh),
 #     the corresponding source of the packages, attached by the source job.
 #
 # Manual trigger. Pick Linux or Windows per run. The package is attached to a
 # GitHub Release, which is a browser download and does not consume Actions
-# artifact storage.
+# artifact storage. With release=false it is kept as a one-day workflow
+# artifact instead, and no release changes.
 #
-# Deliberately out of scope: macOS packages, Authenticode signing, and an
-# update server — the client is built with the updater compiled out.
+# Deliberately out of scope: macOS packages and an update server — the client
+# is built with the updater compiled out.
 #
 # This workflow does not touch the Talk client; that is build-talk-desktop.yml.
 
@@ -49,6 +51,11 @@ on:
         description: "Optional override for both Craft blueprint branches. Empty uses the tag's craftmaster.ini. Used when platform=windows."
         required: false
         default: ""
+      release:
+        description: "Attach the package to the GitHub release. Off: a one-day workflow artifact only (test builds)."
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -127,6 +134,7 @@ jobs:
           ls -l "${name}"
 
       - name: Attach the AppImage to a GitHub Release
+        if: inputs.release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: desktop-${{ github.event.inputs.desktop_ref }}
@@ -136,26 +144,48 @@ jobs:
             ${{ github.event.inputs.desktop_ref }}.
 
             Linux: install with `clients/install-appimage.sh`.
-            Windows: unsigned NSIS setup (SmartScreen will warn).
+            Windows: NSIS setup; `Gantara_Desktop-*-signing.json` says whether
+            it is Authenticode-signed (see SIGNING.md).
             The client does not check for updates; a new version means a new
             build here.
           files: desktop/${{ steps.package.outputs.name }}
           fail_on_unmatched_files: true
           make_latest: false
 
+      - name: Keep the AppImage as a workflow artifact (test build)
+        if: ${{ !inputs.release }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-linux
+          path: desktop/${{ steps.package.outputs.name }}
+          retention-days: 1
+
   windows:
-    name: Rebrand and build Windows installer (unsigned)
+    name: Rebrand and build Windows installer
     if: github.event.inputs.platform == 'windows'
     runs-on: windows-2022
     permissions:
       contents: write # publishes the GitHub release
+      id-token: write # azure/login with OIDC, only when signing is configured
     timeout-minutes: 360
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+      ARTIFACT_SIGNING_ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+      ARTIFACT_SIGNING_PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
     steps:
       - name: Check out this repo (branding overlay)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           path: platform
+
+      - name: Check the signing configuration
+        id: signing
+        shell: bash
+        run: bash platform/.github/scripts/windows-signing-gate.sh
 
       - name: Check out nextcloud/desktop at the pinned tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -181,9 +211,8 @@ jobs:
         shell: bash
         run: bash platform/clients/desktop/branding/apply-branding.sh "${GITHUB_WORKSPACE}/desktop"
 
-      # KDE Craft: install deps from Nextcloud's binary cache, compile the branded
-      # tree, package an NSIS installer. Unsigned on purpose (SIGN_PACKAGE=False).
-      - name: Build + package Windows (Craft / NSIS)
+      # KDE Craft: install deps from Nextcloud's binary cache, compile the branded tree.
+      - name: Build Windows (Craft)
         shell: pwsh
         env:
           BLUEPRINT_BRANCH: ${{ github.event.inputs.craft_blueprint_branch }}
@@ -193,9 +222,53 @@ jobs:
             -DesktopSrc "$env:GITHUB_WORKSPACE\desktop" `
             -Workspace "$env:GITHUB_WORKSPACE" `
             -BlueprintBranch "$env:BLUEPRINT_BRANCH" `
-            -DesktopRef "$env:DESKTOP_REF"
+            -DesktopRef "$env:DESKTOP_REF" `
+            -Stage build
+
+      - name: Install the Artifact Signing tools
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: '& "$env:GITHUB_WORKSPACE\platform\clients\windows-signing.ps1" install'
+
+      # After the hours-long build, so the session is fresh when Craft signs.
+      - name: Log in to Azure (OIDC, no secret)
+        if: steps.signing.outputs.enabled == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Package the NSIS installer. When signing, Craft signs every binary it collects
+      # for the installer, then the installer; build-windows.ps1 then verifies the
+      # installer and every .exe/.dll in its payload with signtool verify /pa.
+      - name: Package Windows (Craft / NSIS)
+        shell: pwsh
+        env:
+          BLUEPRINT_BRANCH: ${{ github.event.inputs.craft_blueprint_branch }}
+          DESKTOP_REF: ${{ github.event.inputs.desktop_ref }}
+        run: |
+          & "$env:GITHUB_WORKSPACE\platform\clients\desktop\branding\build-windows.ps1" `
+            -DesktopSrc "$env:GITHUB_WORKSPACE\desktop" `
+            -Workspace "$env:GITHUB_WORKSPACE" `
+            -BlueprintBranch "$env:BLUEPRINT_BRANCH" `
+            -DesktopRef "$env:DESKTOP_REF" `
+            -Stage package
+
+      # Read by the gantara.eu download page and the release notes to decide whether to
+      # show the SmartScreen hint; mirrored and checksummed with the installers.
+      - name: Record the signing state
+        shell: bash
+        env:
+          DESKTOP_REF: ${{ github.event.inputs.desktop_ref }}
+          SIGNED: ${{ steps.signing.outputs.enabled }}
+        run: |
+          set -euo pipefail
+          printf '{"windows":{"authenticode":%s}}\n' "${SIGNED}" >"desktop-windows-out/Gantara_Desktop-${DESKTOP_REF#v}-signing.json"
+          cat "desktop-windows-out/Gantara_Desktop-${DESKTOP_REF#v}-signing.json"
 
       - name: Attach installer to GitHub Release
+        if: inputs.release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: desktop-${{ github.event.inputs.desktop_ref }}
@@ -205,12 +278,21 @@ jobs:
             ${{ github.event.inputs.desktop_ref }}.
 
             Linux: install with `clients/install-appimage.sh`.
-            Windows: unsigned NSIS setup (SmartScreen will warn).
+            Windows: NSIS setup; `Gantara_Desktop-*-signing.json` says whether
+            it is Authenticode-signed (see SIGNING.md).
             The client does not check for updates; a new version means a new
             build here.
           files: desktop-windows-out/*
           fail_on_unmatched_files: true
           make_latest: false
+
+      - name: Keep the installer as a workflow artifact (test build)
+        if: ${{ !inputs.release }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-windows
+          path: desktop-windows-out/*
+          retention-days: 1
 
   # Runs after whichever platform was built, so the release it attaches to exists.
   # The tarball only depends on the two commits, so a Linux and a Windows run from
@@ -218,7 +300,7 @@ jobs:
   source:
     name: Attach the source tarball
     needs: [appimage, windows]
-    if: always() && (needs.appimage.result == 'success' || needs.windows.result == 'success')
+    if: always() && inputs.release && (needs.appimage.result == 'success' || needs.windows.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write # uploads to the release

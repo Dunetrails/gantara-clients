@@ -1,4 +1,4 @@
-# Build an unsigned Gantara-branded Windows installer of nextcloud/desktop via
+# Build a Gantara-branded Windows installer of nextcloud/desktop via
 # KDE Craft — the same toolchain upstream's windows-build-and-test.yml uses.
 #
 # Prerequisites (workflow installs these):
@@ -6,11 +6,19 @@
 #   - Inkscape (choco) for icon rasterisation
 #   - apply-branding.sh already run against $DesktopSrc
 #
-# Signing is OFF (craftmaster.ini has SIGN_PACKAGE=False; we never set a cert).
+# Signing: unsigned unless ARTIFACT_SIGNING_METADATA is set (clients/windows-signing.ps1
+# install). Then the package stage turns on Craft's CodeSigning with
+# clients/windows-signing.ps1 as WindowsCustomSignCommand: Craft signs every binary it
+# collects for the installer, then the installer itself. Only for --package: with
+# CodeSigning on, Craft also signs each dependency it restores from cache.
 # Output: NSIS installer under <craft-target>/tmp/ (NullsoftInstallerPackager).
 #
 # Usage:
-#   build-windows.ps1 -DesktopSrc <path-to-branded-desktop> [-Workspace <root>]
+#   build-windows.ps1 -DesktopSrc <path-to-branded-desktop> [-Workspace <root>] [-Stage all|build|package]
+#
+# -Stage build compiles, -Stage package packages what an earlier build stage left in
+# -Workspace; the workflow logs in to Azure between the two, so the session is fresh
+# when Craft signs.
 #
 # The blueprint repositories and branches come from the tag's craftmaster.ini,
 # as in upstream CI. -BlueprintBranch overrides both branches.
@@ -20,7 +28,8 @@ param(
     [string]$Workspace = $(if ($env:GITHUB_WORKSPACE) { $env:GITHUB_WORKSPACE } else { (Resolve-Path "$DesktopSrc\..").Path }),
     [string]$CraftTarget = "windows-msvc2022_64-cl",
     [string]$BlueprintBranch = "",
-    [string]$DesktopRef = ""
+    [string]$DesktopRef = "",
+    [ValidateSet("all", "build", "package")][string]$Stage = "all"
 )
 
 $ErrorActionPreference = "Stop"
@@ -341,43 +350,81 @@ function Patch-NextcloudClientBlueprint {
     }
 }
 
-Write-Host "==> Clone CraftMaster"
-if (-not (Test-Path $CraftMaster)) {
-    & cmd /C "git clone -q --depth=1 https://invent.kde.org/packaging/craftmaster.git `"$CraftMaster`" 2>&1"
-    if ($LASTEXITCODE -ne 0) { throw "git clone craftmaster failed" }
+function Set-CraftCodeSigning([bool]$Enabled) {
+    $ini = (Get-Content -Raw $CraftConfig) -replace '(?m)^CodeSigning/.*\r?\n', ''
+    # CraftMaster copies these into CraftSettings.ini; Craft splits the command shlex-style, so
+    # the script path uses forward slashes and must not contain whitespace.
+    $lines = "CodeSigning/Enabled = False`r`n"
+    if ($Enabled) {
+        $signScript = (Resolve-Path (Join-Path $BrandingDir "..\..\windows-signing.ps1")).Path -replace '\\', '/'
+        if ($signScript -match '\s') { throw "Craft splits WindowsCustomSignCommand on whitespace: $signScript" }
+        $lines = "CodeSigning/Enabled = True`r`nCodeSigning/WindowsCustomSignCommand = pwsh -NoProfile -NonInteractive -File $signScript sign -List %F`r`n"
+    }
+    $header = [regex]'(?m)^\[GeneralSettings\][ \t]*\r?\n'
+    if (-not $header.IsMatch($ini)) { throw "[GeneralSettings] missing in $CraftConfig" }
+    $ini = $header.Replace($ini, { param($m) $m.Value + $lines }, 1)
+    [System.IO.File]::WriteAllText($CraftConfig, $ini)
 }
-
-Write-Host "==> Install Craft + nextcloud-client deps (uses upstream binary cache)"
-Write-Host "    blueprints: craft-blueprints-kde@$KdeBlueprintRef, craft-blueprints-nextcloud@$NextcloudBlueprintRef"
-Invoke-Craft --add-blueprint-repository "https://github.com/nextcloud/craft-blueprints-kde.git|$KdeBlueprintRef|"
-Invoke-Craft --add-blueprint-repository "https://github.com/nextcloud/craft-blueprints-nextcloud.git|$NextcloudBlueprintRef|"
-Invoke-Craft craft
-Invoke-Craft --install-deps nextcloud-client
 
 # Put craft's bin on PATH (deployqt etc.)
-$craftBin = Join-Path $Workspace "$CraftTarget\bin"
-if (Test-Path $craftBin) {
-    if ($env:GITHUB_PATH) {
-        echo $craftBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+function Add-CraftBinToPath {
+    $craftBin = Join-Path $Workspace "$CraftTarget\bin"
+    if (Test-Path $craftBin) {
+        if ($env:GITHUB_PATH) {
+            echo $craftBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        }
+        $env:PATH = "$craftBin;$env:PATH"
     }
-    $env:PATH = "$craftBin;$env:PATH"
 }
 
-Write-Host "==> Compile branded desktop from $DesktopSrc"
-# --src-dir already forces craft WorkOffline for this invocation.
-Patch-NextcloudClientBlueprint
-Invoke-Craft --options "nextcloud-client.versionSuffix=$($AppName.ToLower())"
-Invoke-Craft --src-dir $DesktopSrc nextcloud-client
+$Sign = [bool]$env:ARTIFACT_SIGNING_METADATA
+Set-CraftCodeSigning $false
 
-Write-Host "==> Install NSIS (required by Craft NullsoftInstallerPackager)"
-Invoke-Craft nsis
+if ($Stage -ne "package") {
+    Write-Host "==> Clone CraftMaster"
+    if (-not (Test-Path $CraftMaster)) {
+        & cmd /C "git clone -q --depth=1 https://invent.kde.org/packaging/craftmaster.git `"$CraftMaster`" 2>&1"
+        if ($LASTEXITCODE -ne 0) { throw "git clone craftmaster failed" }
+    }
 
-Write-Host "==> Package NSIS installer (unsigned)"
+    Write-Host "==> Install Craft + nextcloud-client deps (uses upstream binary cache)"
+    Write-Host "    blueprints: craft-blueprints-kde@$KdeBlueprintRef, craft-blueprints-nextcloud@$NextcloudBlueprintRef"
+    Invoke-Craft --add-blueprint-repository "https://github.com/nextcloud/craft-blueprints-kde.git|$KdeBlueprintRef|"
+    Invoke-Craft --add-blueprint-repository "https://github.com/nextcloud/craft-blueprints-nextcloud.git|$NextcloudBlueprintRef|"
+    Invoke-Craft craft
+    Invoke-Craft --install-deps nextcloud-client
+
+    Add-CraftBinToPath
+
+    Write-Host "==> Compile branded desktop from $DesktopSrc"
+    # --src-dir already forces craft WorkOffline for this invocation.
+    Patch-NextcloudClientBlueprint
+    Invoke-Craft --options "nextcloud-client.versionSuffix=$($AppName.ToLower())"
+    Invoke-Craft --src-dir $DesktopSrc nextcloud-client
+
+    Write-Host "==> Install NSIS (required by Craft NullsoftInstallerPackager)"
+    Invoke-Craft nsis
+
+    if ($Stage -eq "build") {
+        Write-Host "==> Build stage complete; run -Stage package next"
+        return
+    }
+}
+
+if (-not (Test-Path $CraftMaster)) { throw "no Craft in $Workspace; run -Stage build first" }
+Add-CraftBinToPath
+
+Write-Host "==> Package NSIS installer ($(if ($Sign) { 'signed with Artifact Signing' } else { 'unsigned' }))"
 # Must re-patch then package with --offline so craft does not git-fetch the
 # blueprint repo and restore upstream Nextcloud createPackage().
 Patch-NextcloudClientBlueprint
 Patch-NsisTemplate
-Invoke-Craft --offline --package nextcloud-client
+Set-CraftCodeSigning $Sign
+try {
+    Invoke-Craft --offline --package nextcloud-client
+} finally {
+    Set-CraftCodeSigning $false
+}
 
 # Collect installer artifacts for upload.
 $outDir = Join-Path $Workspace "desktop-windows-out"
@@ -436,6 +483,12 @@ if ($sevenZipPath) {
         } else {
             & $sevenZipPath l $verifyExe.FullName 2>&1 | Out-String
         }
+        if ($Sign) {
+            Write-Host "==> Verifying the signatures on the installer and on every binary in its payload"
+            $payload = Join-Path $tmpList "payload"
+            & $sevenZipPath x "-o$payload" $(if ($inner) { $inner.FullName } else { $verifyExe.FullName }) -y | Out-Null
+            & (Join-Path $BrandingDir "..\..\windows-signing.ps1") verify $verifyExe.FullName $payload
+        }
     } finally {
         Remove-Item -Recurse -Force $tmpList -ErrorAction SilentlyContinue
     }
@@ -449,6 +502,8 @@ if ($sevenZipPath) {
         }
     }
     Write-Host "    ok: licences and notices present in payload"
+} elseif ($Sign) {
+    throw "7z/7za not found, so the signatures inside the installer cannot be verified"
 } else {
     Write-Host "==> Skipping payload exe verification (7z/7za not found)"
 }

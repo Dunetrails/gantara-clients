@@ -12,9 +12,10 @@ name: "Build: Gantara Talk desktop client"
 #   - Both: Gantara_Talk-<version>-source.tar.gz (clients/make-source-tarball.sh), the
 #     corresponding source of the packages including the bundled Talk web app,
 #     attached by the source job.
-#   - Windows: unsigned Squirrel setup .exe (Start Menu / Programs via the installer).
-#     Signing is deliberately OFF — WINDOWS_SIGN_PARAMS is forced empty. SmartScreen
-#     will warn on first run; Azure Artifact Signing / a cert can be wired later.
+#   - Windows: Squirrel setup .exe (Start Menu / Programs via the installer), plus
+#     Gantara_Talk-<version>-signing.json saying whether it is Authenticode-signed.
+#     Signed with Azure Artifact Signing once the repo variables in SIGNING.md are set,
+#     unsigned until then: WINDOWS_SIGN_PARAMS is then empty and forge skips signing.
 #     Auto-update is off: branded builds do not poll GitHub, and the Squirrel
 #     RELEASES/nupkg update feed is not published.
 #
@@ -29,7 +30,8 @@ name: "Build: Gantara Talk desktop client"
 #
 # Manual trigger only. Pick Linux or Windows per run (not both). The package
 # is attached to a GitHub Release (browser download; not Actions artifact
-# quota).
+# quota). With release=false it is kept as a one-day workflow artifact
+# instead, and no release changes.
 
 on:
   workflow_dispatch:
@@ -50,6 +52,11 @@ on:
         description: "Release channel compiled into the app: stable, beta or dev. (Since v2.3 the bundled Talk is fixed by the tag.)"
         required: true
         default: "stable"
+      release:
+        description: "Attach the package to the GitHub release. Off: a one-day workflow artifact only (test builds)."
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -132,23 +139,41 @@ jobs:
           done
 
       - name: Attach AppImage to GitHub Release
+        if: inputs.release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: talk-desktop-${{ github.event.inputs.talk_desktop_ref }}
           name: Gantara Talk desktop ${{ github.event.inputs.talk_desktop_ref }}
           body: |
             Rebranded Nextcloud Talk desktop client. Download the asset and distribute that file.
-            Windows builds are unsigned (SmartScreen will warn) and do not auto-update.
+            Windows builds do not auto-update; `Gantara_Talk-*-signing.json` says whether the
+            setup is Authenticode-signed (see SIGNING.md).
           files: talk-desktop/out/appimage/*.AppImage
           fail_on_unmatched_files: true
           make_latest: false
 
+      - name: Keep the AppImage as a workflow artifact (test build)
+        if: ${{ !inputs.release }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: talk-linux
+          path: talk-desktop/out/appimage/*.AppImage
+          retention-days: 1
+
   windows:
-    name: Rebrand + build Talk desktop (Windows EXE, unsigned)
+    name: Rebrand + build Talk desktop (Windows EXE)
     if: github.event.inputs.platform == 'windows'
     runs-on: windows-latest
     permissions:
       contents: write # publishes the GitHub release
+      id-token: write # azure/login with OIDC, only when signing is configured
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+      ARTIFACT_SIGNING_ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+      ARTIFACT_SIGNING_PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
     steps:
       - name: Checkout talk-desktop at pinned tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -163,6 +188,11 @@ jobs:
         with:
           persist-credentials: false
           path: platform
+
+      - name: Check the signing configuration
+        id: signing
+        shell: bash
+        run: bash platform/.github/scripts/windows-signing-gate.sh
 
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -200,18 +230,46 @@ jobs:
         working-directory: talk-desktop
         run: npm run generate-icons
 
-      # Unsigned on purpose: WINDOWS_SIGN_PARAMS is forced empty, so forge skips
-      # Authenticode. SmartScreen will warn on first launch until a cert / Azure
-      # Artifact Signing is wired. Do not attach Squirrel's RELEASES/nupkg — those
-      # are an update feed, and this client does not auto-update.
-      - name: Build + package (Windows Squirrel EXE, unsigned)
+      # Upstream's forge config hands WINDOWS_SIGN_PARAMS to @electron/windows-sign, which
+      # signs the .exe/.dll/.node files of the packaged app (signtool from
+      # WINDOWS_SIGNTOOL_PATH), and to Squirrel, which signs Update.exe, the exes in the
+      # nupkg and Setup.exe with the signtool.exe in electron-winstaller's vendor folder.
+      # That one dates from 2014 and cannot load the Artifact Signing dlib, so it is
+      # replaced with the SDK's; --skip-install keeps release:package's own npm ci from
+      # restoring it (our npm ci above already ran).
+      - name: Set up Artifact Signing for forge and Squirrel
+        id: sign-params
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          & "$env:GITHUB_WORKSPACE\platform\clients\windows-signing.ps1" install
+          $vendored = @(Get-ChildItem -Path talk-desktop\node_modules -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '[\\/]electron-winstaller[\\/]vendor[\\/]signtool\.exe$' })
+          if ($vendored.Count -eq 0) { throw "electron-winstaller's vendor\signtool.exe not found" }
+          foreach ($f in $vendored) { Copy-Item -Force $env:SIGNTOOL_EXE $f.FullName; Write-Host "replaced $($f.FullName)" }
+          "WINDOWS_SIGNTOOL_PATH=$env:SIGNTOOL_EXE" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "params=$env:ARTIFACT_SIGNING_PARAMS" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Log in to Azure (OIDC, no secret)
+        if: steps.signing.outputs.enabled == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Unsigned while signing is not configured: WINDOWS_SIGN_PARAMS is then empty, so
+      # forge skips Authenticode. Do not attach Squirrel's RELEASES/nupkg — those are an
+      # update feed, and this client does not auto-update.
+      - name: Build + package (Windows Squirrel EXE)
         working-directory: talk-desktop
         env:
           CHANNEL: ${{ github.event.inputs.channel }}
-          WINDOWS_SIGN_PARAMS: ""
-        run: npm run release:package -- --windows --skip-check
+          WINDOWS_SIGN_PARAMS: ${{ steps.sign-params.outputs.params }}
+        run: npm run release:package -- --windows --skip-check --skip-install
 
-      - name: Collect unsigned setup EXE
+      - name: Collect setup EXE
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -232,17 +290,52 @@ jobs:
           Copy-Item -Force $exes[0].FullName $dest
           Write-Host "artifact: $($exes[0].FullName) -> $dest"
 
+      # The nupkg is what Setup.exe installs, Update.exe included.
+      - name: Verify the signatures (setup and every binary it installs)
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $nupkg = @(Get-ChildItem -Path "talk-desktop\out\make\squirrel.windows" -Recurse -Filter *-full.nupkg)
+          if ($nupkg.Count -ne 1) { throw "Expected one full nupkg, found: $($nupkg.Name -join ', ')" }
+          $payload = Join-Path $env:RUNNER_TEMP "talk-payload"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [IO.Compression.ZipFile]::ExtractToDirectory($nupkg[0].FullName, $payload)
+          & "$env:GITHUB_WORKSPACE\platform\clients\windows-signing.ps1" verify talk-desktop-windows-out\Gantara_Talk-windows-x64.exe $payload
+
+      # Read by the gantara.eu download page and the release notes to decide whether to
+      # show the SmartScreen hint; mirrored and checksummed with the installers.
+      - name: Record the signing state
+        shell: bash
+        env:
+          TALK_REF: ${{ github.event.inputs.talk_desktop_ref }}
+          SIGNED: ${{ steps.signing.outputs.enabled }}
+        run: |
+          set -euo pipefail
+          printf '{"windows":{"authenticode":%s}}\n' "${SIGNED}" >"talk-desktop-windows-out/Gantara_Talk-${TALK_REF#v}-signing.json"
+          cat "talk-desktop-windows-out/Gantara_Talk-${TALK_REF#v}-signing.json"
+
       - name: Attach setup EXE to GitHub Release
+        if: inputs.release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: talk-desktop-${{ github.event.inputs.talk_desktop_ref }}
           name: Gantara Talk desktop ${{ github.event.inputs.talk_desktop_ref }}
           body: |
             Rebranded Nextcloud Talk desktop client. Download the asset and distribute that file.
-            Windows builds are unsigned (SmartScreen will warn) and do not auto-update.
-          files: talk-desktop-windows-out/*.exe
+            Windows builds do not auto-update; `Gantara_Talk-*-signing.json` says whether the
+            setup is Authenticode-signed (see SIGNING.md).
+          files: talk-desktop-windows-out/*
           fail_on_unmatched_files: true
           make_latest: false
+
+      - name: Keep the setup EXE as a workflow artifact (test build)
+        if: ${{ !inputs.release }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: talk-windows
+          path: talk-desktop-windows-out/*
+          retention-days: 1
 
   # Runs after whichever platform was built, so the release it attaches to exists.
   # The tarball only depends on the commits, so a Linux and a Windows run from the
@@ -250,7 +343,7 @@ jobs:
   source:
     name: Attach the source tarball
     needs: [linux, windows]
-    if: always() && (needs.linux.result == 'success' || needs.windows.result == 'success')
+    if: always() && inputs.release && (needs.linux.result == 'success' || needs.windows.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write # uploads to the release

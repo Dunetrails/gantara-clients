@@ -10,7 +10,7 @@ preference.
 
 This directory turns the Linux and Windows sync client into **Gantara** and
 nothing else. No features are added, removed or changed — same code, different
-name, artwork and links. Windows builds are unsigned for now.
+name, artwork and links. Windows builds are signed once Azure Artifact Signing is set up.
 
 The client first shipped as *Dunetrails*. Only what users see moved to Gantara: the
 settings directory, keychain entries, autostart entry, executable, `.desktop` / D-Bus
@@ -39,7 +39,7 @@ clients/desktop/
     branding.env             <- every name, identifier, URL and Windows GUID
     apply-branding.sh        <- rewrites a checked-out nextcloud/desktop tree
     verify-branding.sh       <- compliance sweep; fails the build on a leftover
-    build-windows.ps1        <- Craft-based unsigned Windows NSIS package
+    build-windows.ps1        <- Craft-based Windows NSIS package (signed when configured)
     build-windows-local.ps1  <- full local VM build (prereqs + clone + package)
     assets/gantara-*.svg     <- brand vectors: colour star, horizontal logo (light/dark)
     assets/logo.png          <- the colour star as PNG, for the NSIS installer
@@ -207,7 +207,8 @@ Actions → **Build: Gantara desktop sync client** → *Run workflow*.
 
 Linux is upstream's `admin/linux/build-appimage.sh`. Windows is KDE Craft via
 `clients/desktop/branding/build-windows.ps1` (same path as upstream's
-`windows-build-and-test.yml`), packaging an unsigned NSIS installer. Both assets attach
+`windows-build-and-test.yml`), packaging an NSIS installer, signed once Azure is set up
+(see [Installing the Windows setup](#installing-the-windows-setup)). Both assets attach
 to the same **GitHub Release** (`desktop-<tag>`), which is a browser download and does
 not consume Actions artifact storage. After either platform, the `source` job attaches
 `Gantara_Desktop-<version>-source.tar.gz` ([`../make-source-tarball.sh`](../make-source-tarball.sh)):
@@ -218,8 +219,10 @@ both platforms of a version from the same commit and the second upload is the sa
 This repo is private. Customers download from the public
 [`Dunetrails/gantara-clients`](https://github.com/Dunetrails/gantara-clients) instead:
 `.github/workflows/publish-public-clients.yml` mirrors every `Gantara_*` release asset there
-after a successful build, writes a `Gantara_Desktop-<version>-SHA256SUMS.txt` next to them,
-and copies this folder and the licence files into the repo. The source tarball and the
+after a successful build, writes a `Gantara_Desktop-<version>-SHA256SUMS.txt` next to them
+and signs it with Sigstore (`.sigstore.json`, keyless, `.github/scripts/sign-checksums.sh`),
+and copies this folder and the licence files into the repo. A test build with
+`release=false` attaches nothing and keeps the package as a one-day workflow artifact. The source tarball and the
 written offer in the notices are what the GPL requires for a binary we distribute, so a
 client must not reach customers any other way.
 
@@ -263,17 +266,21 @@ FUSE mount, which does not exist at the next login.
 [`clients/reset-linux-clients.sh`](../reset-linux-clients.sh) clears out every client,
 branded or not, from a Linux account — useful when a test install has left state behind.
 
-## Installing the Windows setup (unsigned)
+## Installing the Windows setup
 
 Download the `.exe` from the GitHub Release and run it. The NSIS installer creates
 Start Menu / Programs entries.
 
-**The installer is not code-signed yet** (Craft `SIGN_PACKAGE=False`; upstream's
-`craftmaster.ini` already ships that). It is the customer download all the same: on first
-launch Windows SmartScreen typically shows “Windows protected your PC” → *More info* →
-*Run anyway*, and the website, the public README and the support page say so. Signing with
-Azure Artifact Signing is planned; once it is wired into the Windows job, drop the
-SmartScreen caveat everywhere it is mentioned.
+**Code signing.** Once the repo variables in
+[`docs/runbooks/windows-code-signing.md`](../../docs/runbooks/windows-code-signing.md) are
+set, the Windows job signs with Azure Artifact Signing: `build-windows.ps1 -Stage package`
+turns on Craft's `CodeSigning` with [`../windows-signing.ps1`](../windows-signing.ps1) as
+the sign command, so Craft signs every binary it collects and then the installer, and the
+script verifies them all. Until then the installer is unsigned and Windows SmartScreen
+shows “Windows protected your PC” → *More info* → *Run anyway*. Each Windows build writes
+`Gantara_Desktop-<version>-signing.json`; the release notes and gantara.eu/download show
+the SmartScreen hint only while it says unsigned. How users verify:
+[`SIGNING.md`](../../public/gantara-clients/SIGNING.md).
 
 ### Local Windows VM (no Actions)
 
@@ -309,8 +316,11 @@ customers on a safe version is this procedure. It covers Gantara Talk too
    `linux` and for `windows` from that commit. Each run attaches its package and the source
    tarball; a failing anchor in `apply-branding.sh` means upstream moved a string.
 3. **Check the release.** In the public repo: the versioned release has both installers, the
-   source tarball and the SHA256SUMS file, and `desktop-latest` shows the new version in its
-   title. Install it once on Windows and Linux and add an account.
+   source tarball, the SHA256SUMS file with its `.sigstore.json` and the `signing.json`, and
+   `desktop-latest` shows the new version in its title. Run the checks in
+   [SIGNING.md](../../public/gantara-clients/SIGNING.md#check-a-download) once, install it on
+   Windows and Linux and add an account. Then rebuild the website so gantara.eu/download
+   shows the new version, its checksums and its signing state.
 4. **Tell the users.** The client cannot, so announce it on every tenant from the server.
    The [Announcement Center](https://apps.nextcloud.com/apps/announcementcenter) app
    (7.5.1 supports Nextcloud 35) is the tool for this: one
@@ -325,8 +335,8 @@ customers on a safe version is this procedure. It covers Gantara Talk too
 
 ## Limitations
 
-- **x86_64 Linux AppImage + Windows NSIS, not code-signed yet.** SmartScreen warns until
-  Azure Artifact Signing is wired in. No macOS package (needs a Developer ID and
+- **x86_64 Linux AppImage + Windows NSIS.** Windows is signed once Azure Artifact Signing is
+  configured; the AppImage has no embedded signature, the signed SHA256SUMS covers it. No macOS package (needs a Developer ID and
   notarisation). WiX MSI can come later; Craft currently emits NSIS.
 - **No updates.** The updater is compiled out, so a new version means a new build here and
   a new file for the user; see [Release procedure](#release-procedure).
