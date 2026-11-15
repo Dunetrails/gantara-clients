@@ -84,15 +84,16 @@ function Get-CraftIniValue([string]$Key) {
 $KdeBlueprintRef = if ($BlueprintBranch) { $BlueprintBranch } else { Get-CraftIniValue "craft/craft-blueprints-kde.revision" }
 $NextcloudBlueprintRef = if ($BlueprintBranch) { $BlueprintBranch } else { Get-CraftIniValue "craft/craft-blueprints-nextcloud.revision" }
 
-# Pin unsigned. Upstream's craftmaster.ini already has SIGN_PACKAGE=False for CI;
-# force it so a tag bump cannot start requiring a cert we do not have.
+# SIGN_PACKAGE is upstream's certificate-file signing; we sign through Craft's
+# CodeSigning settings instead (Set-CraftCodeSigning). Force it off so a tag bump
+# cannot start requiring a cert file we do not have.
 $ini = Get-Content -Raw $CraftConfig
 $ini = [regex]::Replace($ini, '(?m)^SIGN_PACKAGE\s*=.*$', 'SIGN_PACKAGE = False')
 if ($ini -notmatch '(?m)^SIGN_PACKAGE\s*=') {
     $ini = $ini.TrimEnd() + "`r`n`r`n[Env]`r`nSIGN_PACKAGE = False`r`n"
 }
 [System.IO.File]::WriteAllText($CraftConfig, $ini)
-Write-Host "==> SIGN_PACKAGE=False (no Authenticode cert)"
+Write-Host "==> SIGN_PACKAGE=False (signing, if configured, goes through CodeSigning/WindowsCustomSignCommand)"
 
 function Invoke-Craft {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$CraftArgs)
