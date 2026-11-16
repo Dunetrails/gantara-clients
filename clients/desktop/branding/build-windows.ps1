@@ -9,8 +9,9 @@
 # Signing: unsigned unless ARTIFACT_SIGNING_METADATA is set (clients/windows-signing.ps1
 # install). Then the package stage turns on Craft's CodeSigning with
 # clients/windows-signing.ps1 as WindowsCustomSignCommand: Craft signs every binary it
-# collects for the installer, then the installer itself. Only for --package: with
-# CodeSigning on, Craft also signs each dependency it restores from cache.
+# collects for the installer (SignCache off, so cache-restored deps too), then the installer
+# itself. Only for --package: with CodeSigning on, Craft also signs each dependency it
+# restores from cache.
 # Output: NSIS installer under <craft-target>/tmp/ (NullsoftInstallerPackager).
 #
 # Usage:
@@ -359,7 +360,10 @@ function Set-CraftCodeSigning([bool]$Enabled) {
     if ($Enabled) {
         $signScript = (Resolve-Path (Join-Path $BrandingDir "..\..\windows-signing.ps1")).Path -replace '\\', '/'
         if ($signScript -match '\s') { throw "Craft splits WindowsCustomSignCommand on whitespace: $signScript" }
-        $lines = "CodeSigning/Enabled = True`r`nCodeSigning/WindowsCustomSignCommand = pwsh -NoProfile -NonInteractive -File $signScript sign -List %F`r`n"
+        # SignCache defaults to Enabled, and then the packager only signs nextcloud-client's own
+        # files, assuming the deps restored from Nextcloud's (unsigned) cache were signed when
+        # cached. Off, it signs every binary it copies into the installer.
+        $lines = "CodeSigning/Enabled = True`r`nCodeSigning/SignCache = False`r`nCodeSigning/WindowsCustomSignCommand = pwsh -NoProfile -NonInteractive -File $signScript sign -List %F`r`n"
     }
     $header = [regex]'(?m)^\[GeneralSettings\][ \t]*\r?\n'
     if (-not $header.IsMatch($ini)) { throw "[GeneralSettings] missing in $CraftConfig" }
