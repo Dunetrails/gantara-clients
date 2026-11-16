@@ -290,14 +290,16 @@ jobs:
           Copy-Item -Force $exes[0].FullName $dest
           Write-Host "artifact: $($exes[0].FullName) -> $dest"
 
-      # The nupkg is what Setup.exe installs, Update.exe included.
+      # The nupkg is what Setup.exe installs, Update.exe included. Upstream's postMake hook
+      # renames Squirrel's <id>-<version>-full.nupkg to <app>-windows-x64.nupkg, and with no
+      # remoteReleases there is no delta package, so the only nupkg is the full one.
       - name: Verify the signatures (setup and every binary it installs)
         if: steps.signing.outputs.enabled == 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $nupkg = @(Get-ChildItem -Path "talk-desktop\out\make\squirrel.windows" -Recurse -Filter *-full.nupkg)
-          if ($nupkg.Count -ne 1) { throw "Expected one full nupkg, found: $($nupkg.Name -join ', ')" }
+          $nupkg = @(Get-ChildItem -Path "talk-desktop\out\make\squirrel.windows" -Recurse -Filter *.nupkg)
+          if ($nupkg.Count -ne 1) { throw "Expected one nupkg, found: $($nupkg.Name -join ', ')" }
           $payload = Join-Path $env:RUNNER_TEMP "talk-payload"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           [IO.Compression.ZipFile]::ExtractToDirectory($nupkg[0].FullName, $payload)
