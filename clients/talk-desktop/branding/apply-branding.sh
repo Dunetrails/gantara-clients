@@ -231,7 +231,8 @@ fi
 AUTH_VUE="${SRC}/src/authentication/renderer/AuthenticationApp.vue"
 PLACEHOLDER="https://<<tenant>>.gantara.eu"
 if [ -f "${AUTH_VUE}" ] && grep -q 'https://try\.nextcloud\.com' "${AUTH_VUE}"; then
-  sed -i "s#https://try\.nextcloud\.com#${PLACEHOLDER}#g" "${AUTH_VUE}"
+  # -i.bak: BSD sed on macOS takes -i's argument as a backup suffix.
+  sed -i.bak "s#https://try\.nextcloud\.com#${PLACEHOLDER}#g" "${AUTH_VUE}" && rm -f "${AUTH_VUE}.bak"
   echo "    - patched login placeholder -> ${PLACEHOLDER}"
 else
   echo "    ! login placeholder not found in AuthenticationApp.vue (upstream changed?) — skipped" >&2
