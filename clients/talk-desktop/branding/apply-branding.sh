@@ -11,7 +11,8 @@
 # for Linux UX (no GitHub Update item, matching WM_CLASS, second launch focuses
 # the existing window, no Vue Devtools in packaged builds, AppImage-safe relaunch)
 # and Windows packaging (Squirrel icon URL + loading GIF, no Authenticode, no
-# auto-update). Linux tray uses a host StatusNotifierItem helper (sni_tray.py) so
+# auto-update), and macOS packaging (bundle name, DMG background, menu-bar template
+# icon). Linux tray uses a host StatusNotifierItem helper (sni_tray.py) so
 # GNOME AppIndicator can see it.
 #
 # Names: build.config.json `applicationName` ("Dunetrails Talk") stays the app's
@@ -130,7 +131,6 @@ for entry in \
   talk-icon-rounded.svg:0 \
   talk-icon-rounded-spaced.svg:48 \
   talk-icon-mac-shadow.svg:48 \
-  talk-icon-plain-light.svg:0 \
   talk-icon-plain-spaced-light.svg:48 \
   talk-icon-plain-spaced-dark.svg:48
 do
@@ -143,6 +143,21 @@ do
     echo "    ! skipped img/${svg} (not present in this release)" >&2
   fi
 done
+
+# The macOS menu-bar icon (IconTrayMacTemplate.png) is a template image: macOS keeps only
+# its alpha channel and paints it in the menu bar's colour, so the tile above would come
+# out as a solid square. It gets the bare star instead.
+MAC_TRAY_SVG="${IMG}/talk-icon-plain-light.svg"
+if [ -f "${MAC_TRAY_SVG}" ]; then
+  cat > "${MAC_TRAY_SVG}" <<SVG
+<svg xmlns="http://www.w3.org/2000/svg" data-brand="gantara" width="512" height="512" viewBox="0 0 512 512">
+  $(nested_logo "${STAR_WHITE}" 24 24 464 464)
+</svg>
+SVG
+  echo "    - replaced img/talk-icon-plain-light.svg (bare star, macOS menu-bar template)"
+else
+  echo "    ! skipped img/talk-icon-plain-light.svg (not present in this release)" >&2
+fi
 
 # 2b. Logos rendered directly by the app UI. White versions on the brand-colour
 #     welcome/login backgrounds; the nav icon (on light UI) stays full colour.
@@ -165,6 +180,48 @@ if [ -f "${SQUIRREL_GIF}" ] && [ -f "${IMG}/squirrel-install-loading.gif" ]; the
   echo "    - replaced img/squirrel-install-loading.gif"
 elif [ -f "${IMG}/squirrel-install-loading.gif" ]; then
   echo "    ! squirrel-install-loading.gif overlay missing — Windows setup would keep the Nextcloud animation" >&2
+fi
+
+# macOS DMG window background. Upstream's is Nextcloud's default theme wallpaper. Same
+# layout (the maker places the app at 192,344 and the Applications link at 448,344, each
+# on a light box so Finder's dark labels stay readable), on the brand gradient with the
+# white logo. Rasterised with the sharp that talk-desktop's dev dependencies install;
+# appdmg picks up the @2x file for Retina screens.
+DMG_BG="${IMG}/dmg-background.png"
+if [ -f "${DMG_BG}" ]; then
+  [ -d "${SRC}/node_modules/sharp" ] ||
+    { echo "error: ${SRC}/node_modules/sharp missing; run npm ci before apply-branding.sh" >&2; exit 1; }
+  read -r GRADIENT_TOP GRADIENT_BOTTOM <<<"$(sed -n 's/.*"brandGradient"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${CONFIG}" |
+    grep -o '#[0-9A-Fa-f]\{6\}' | head -n2 | tr '\n' ' ')"
+  GRADIENT_TOP="${GRADIENT_TOP:-${BRAND_COLOR}}"
+  GRADIENT_BOTTOM="${GRADIENT_BOTTOM:-${BRAND_COLOR}}"
+  DMG_SVG="${SRC}/.overrides/dmg-background.svg"
+  cat > "${DMG_SVG}" <<SVG
+<svg xmlns="http://www.w3.org/2000/svg" width="658" height="498" viewBox="0 0 658 498">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${GRADIENT_TOP}"/>
+      <stop offset="1" stop-color="${GRADIENT_BOTTOM}"/>
+    </linearGradient>
+  </defs>
+  <rect width="658" height="498" fill="url(#bg)"/>
+  $(nested_logo "${HORIZONTAL_WHITE}" 219 110 220 57)
+  <rect x="129" y="295" width="126" height="126" rx="8" fill="#ffffff" fill-opacity="0.6"/>
+  <rect x="385" y="295" width="126" height="126" rx="8" fill="#ffffff" fill-opacity="0.6"/>
+  <path d="M306 333 L330 357 L306 381" fill="none" stroke="#ffffff" stroke-opacity="0.6" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+SVG
+  (cd "${SRC}" && node -e "
+    const sharp = require('sharp')
+    const [svg, out1x, out2x] = process.argv.slice(1)
+    Promise.all([
+      sharp(svg, { density: 72 }).png().toFile(out1x),
+      sharp(svg, { density: 144 }).png().toFile(out2x),
+    ]).catch((error) => { console.error(error); process.exit(1) })
+  " "${DMG_SVG}" "${DMG_BG}" "${IMG}/dmg-background@2x.png")
+  echo "    - replaced img/dmg-background.png and @2x (brand gradient, white logo)"
+else
+  echo "    ! skipped img/dmg-background.png (not present in this release — DMG would show Nextcloud art)" >&2
 fi
 
 # 3. Source string patch: the login screen's server-address field placeholder is a
@@ -340,6 +397,22 @@ patch(
     "forge.config.js",
     r"(// Meta\r?\n[ \t]*)title: BUILD_CONFIG\.applicationName,",
     r"\1title: BUILD_CONFIG.displayName || BUILD_CONFIG.applicationName,",
+)
+# macOS: the bundle name is what Finder, the Dock, Launchpad and the menu bar show, and no
+# earlier macOS install has to keep its identity, so the .app carries the display name.
+# The settings directory still comes from package.json productName, and the bundle id
+# (com.dunetrails.talk.mac) from the domain, as on the other platforms.
+patch(
+    "forge.config.js",
+    r"(// Common\r?\n[ \t]*)name: BUILD_CONFIG\.applicationName,",
+    r"\1name: process.platform === 'darwin' ? (BUILD_CONFIG.displayName || BUILD_CONFIG.applicationName) : BUILD_CONFIG.applicationName,",
+)
+# The DMG's volume name, shown in Finder's sidebar while it is mounted. It must stay free
+# of spaces, or appdmg drops the background.
+patch(
+    "forge.config.js",
+    r"title: BUILD_CONFIG\.applicationNameSanitized,",
+    "title: (BUILD_CONFIG.displayName || BUILD_CONFIG.applicationName).replace(/[^a-z0-9]/gi, ''),",
 )
 # On update Squirrel only creates the shortcuts under the new names; the ones the
 # Dunetrails-named builds created would stay behind next to them.

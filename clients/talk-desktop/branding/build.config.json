@@ -14,7 +14,7 @@
 	"privacyUrl": "https://gantara.eu/privacy-policy",
 	"windowsExe": true,
 	"windowsMsi": false,
-	"macosDmg": false,
+	"macosDmg": true,
 	"linuxFlatpak": false,
 	"linuxZip": true
 }

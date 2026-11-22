@@ -1,13 +1,14 @@
 # Signatures and how to check a download
 
-Every Gantara Desktop and Gantara Talk release has three kinds of proof that a file is ours and
+Every Gantara Desktop and Gantara Talk release has these kinds of proof that a file is ours and
 unchanged:
 
 | What | Covers | Signed with |
 |--|--|--|
-| `Gantara_<App>-<version>-SHA256SUMS.txt` | SHA-256 of every file in the release: Windows installer, AppImage, source tarball | — |
+| `Gantara_<App>-<version>-SHA256SUMS.txt` | SHA-256 of every file in the release: Windows installer, macOS package, AppImage, source tarball | — |
 | `Gantara_<App>-<version>-SHA256SUMS.txt.sigstore.json` | The checksum file above | [Sigstore](https://www.sigstore.dev/), keyless, by our release pipeline on GitHub Actions |
 | Authenticode signature inside the Windows installer | The installer and every program file and library it installs | Azure Artifact Signing, as Dunetrails BV |
+| Developer ID signature and notarisation ticket on the macOS package | The disk image or installer, and the app inside it | Apple Developer ID, as Dunetrails, notarised by Apple |
 
 The fixed `desktop-latest` and `talk-latest` releases carry the same files without the version in
 their names (`Gantara_Desktop-SHA256SUMS.txt`, and so on).
@@ -69,6 +70,25 @@ Get-AuthenticodeSignature .\Gantara_Desktop-x64-setup.exe | Format-List Status, 
 for a while after a release: it trusts a new file once enough people have downloaded it. Choose
 *More info*, then *Run anyway*.
 
+### 4. The macOS signature
+
+macOS checks this itself: Gatekeeper only opens a downloaded app that is signed with a Developer
+ID and notarised by Apple, so a damaged or altered app does not start. To see it before opening
+the download, in Terminal:
+
+```sh
+spctl -a -vvv -t open --context context:primary-signature Gantara_Talk-macos-universal.dmg
+```
+
+It must say `accepted`, `source=Notarized Developer ID` and
+`origin=Developer ID Application: Dunetrails (…)`. After installing, the same check on the app:
+
+```sh
+spctl -a -vvv "/Applications/Gantara Talk.app"
+```
+
+macOS packages are only released signed and notarised; there is no unsigned macOS release.
+
 ## How the signing works
 
 The builds run in GitHub Actions in our platform repository; this repository receives the source
@@ -92,6 +112,19 @@ never leaves Microsoft's HSMs. Every signature is SHA-256 with an RFC 3161 times
 Signing is switched on by repository variables. Without them the builds stay unsigned, which
 `signing.json` and the release notes then say.
 
+**macOS (Developer ID and notarisation).** The macOS jobs run on GitHub's macOS runners. The
+Developer ID certificates of Dunetrails are imported into a keychain that exists only for the
+job and is deleted at its end. Everything is signed with the hardened runtime and a secure
+timestamp from Apple, then submitted to Apple's notary service, which scans it and issues a
+ticket; the ticket is stapled to the file, so Gatekeeper can check it offline.
+
+- Gantara Talk: Electron Forge signs every executable, framework and library of the universal
+  (Apple Silicon and Intel) app and has it notarised. The job then signs, notarises and staples
+  the DMG around it.
+- Afterwards the job checks the DMG and the app inside with `codesign --verify --deep --strict`,
+  `spctl` and `stapler validate`, and fails if any of them is not signed by our team, lacks the
+  hardened runtime or has no ticket.
+
 **Checksums (Sigstore).** After the builds, the publishing workflow writes the checksum file from
 the SHA-256 digests GitHub computed on upload and signs it with
 [cosign](https://github.com/sigstore/cosign) in keyless mode: GitHub vouches for the workflow's
@@ -109,7 +142,11 @@ so `cosign verify-blob` works without contacting us.
 - **Windows certificate:** Azure Artifact Signing renews the certificate daily on its own. The
   organisation's identity validation has to be renewed when it expires; Microsoft emails 60 days
   before. Without renewal the Windows builds fail at the signing step, they do not ship unsigned.
-- **Access from GitHub:** no secret to rotate. Access is a federated credential trusting only
+- **macOS certificates:** Developer ID certificates are renewed about once a year. What was signed
+  before one expires keeps opening, because the signatures are timestamped and the notarisation tickets stay
+  valid. If the key were ever exposed, we would revoke the certificates at Apple; Gatekeeper then
+  rejects everything signed with them, so a rebuild with new certificates would follow at once.
+- **Access from GitHub (Windows):** no secret to rotate. Access is a federated credential trusting only
   the `main` branch of the platform repository, plus the *Artifact Signing Certificate Profile
   Signer* role on one certificate profile. Removing either stops signing at once.
 - **If a signed file or the signing access were misused:** remove the role assignment, then

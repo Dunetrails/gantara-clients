@@ -67,6 +67,16 @@ expect_in_file .overrides/build.config.json '"windowsExe": true' \
   "Windows Squirrel EXE enabled"
 expect_in_file .overrides/build.config.json '"windowsMsi": false' \
   "Windows MSI left off (no WiX / no signing path)"
+expect_in_file .overrides/build.config.json '"macosDmg": true' \
+  "macOS DMG enabled"
+expect_in_file forge.config.js "process.platform === 'darwin' ? (BUILD_CONFIG.displayName" \
+  "macOS app bundle carries the display name"
+expect_in_file forge.config.js "title: (BUILD_CONFIG.displayName || BUILD_CONFIG.applicationName).replace" \
+  "DMG volume name is the display name"
+expect_in_file forge.config.js 'osxSign: hasMacosSign && {}' \
+  "macOS signing still gated on the Apple credentials (unset = unsigned)"
+expect_in_file forge.config.js 'osxNotarize: hasMacosSign && {' \
+  "macOS notarisation still gated on the Apple credentials"
 
 # Names, IDs, installer metadata
 expect_in_file package.json '"productName": "Dunetrails Talk"' \
@@ -118,8 +128,24 @@ else
   fail "Squirrel loading GIF missing (installer would show Nextcloud art)"
 fi
 
+# The DMG background is a PNG, so compare it with the upstream commit instead.
+for png in img/dmg-background.png img/dmg-background@2x.png; do
+  if [ ! -f "${png}" ]; then
+    fail "${png} missing (the DMG would have no background)"
+    continue
+  fi
+  rc=0
+  git diff --quiet HEAD -- "${png}" || rc=$?
+  case "${rc}" in
+    0) fail "${png} is still upstream's Nextcloud wallpaper" ;;
+    1) pass "${png} is the Gantara background" ;;
+    *) fail "${png}: cannot compare with upstream (not a git checkout?)" ;;
+  esac
+done
+
 # Logos users actually see, and the icon-gen sources
-for svg in talk-logo.svg server-logo-plain.svg talk-icon-plain-dark.svg talk-icon-rounded.svg talk-icon-rounded-spaced.svg; do
+for svg in talk-logo.svg server-logo-plain.svg talk-icon-plain-dark.svg talk-icon-rounded.svg talk-icon-rounded-spaced.svg \
+  talk-icon-mac-shadow.svg talk-icon-plain-light.svg; do
   if [ -f "img/${svg}" ] && grep -q 'data-brand="gantara"' "img/${svg}"; then
     pass "img/${svg} is the Gantara logo"
   else

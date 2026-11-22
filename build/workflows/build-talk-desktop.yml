@@ -18,17 +18,21 @@ name: "Build: Gantara Talk desktop client"
 #     unsigned until then: WINDOWS_SIGN_PARAMS is then empty and forge skips signing.
 #     Auto-update is off: branded builds do not poll GitHub, and the Squirrel
 #     RELEASES/nupkg update feed is not published.
+#   - macOS: universal (Apple Silicon + Intel) DMG. Electron Forge signs the app with the
+#     Developer ID Application identity and has Apple notarise it; the job then signs,
+#     notarises and staples the DMG itself and checks both with Gatekeeper. Signing needs
+#     the secrets in docs/runbooks/macos-code-signing.md and runs on main only. There is no
+#     unsigned macOS release: without signing, only a test build (release=false) is allowed.
 #
 # The build config sets primaryColor/backgroundColor to the Gantara colour, which
 # themes the in-app Talk web UI. To keep builds fast, pre-extracted themed styles are
 # committed under clients/talk-desktop/branding/styles/ and staged by apply-branding.sh, so
 # release:package reuses them and skips the Docker-based extraction. If they are absent or
 # stale for the bundled Nextcloud major, the Linux job extracts them itself (Docker, adds
-# several minutes) and the Windows job stops — run the "Build: Talk desktop theme styles (refresh)" workflow
+# several minutes) and the Windows and macOS jobs stop — run the "Build: Talk desktop theme styles (refresh)" workflow
 # (refresh-talk-styles.yml) first.
-# macOS (and its notarization) stays disabled in the build config.
 #
-# Manual trigger only. Pick Linux or Windows per run (not both). The package
+# Manual trigger only. Pick one platform per run. The package
 # is attached to a GitHub Release (browser download; not Actions artifact
 # quota). With release=false it is kept as a one-day workflow artifact
 # instead, and no release changes.
@@ -43,6 +47,7 @@ on:
         options:
           - linux
           - windows
+          - macos
         default: linux
       talk_desktop_ref:
         description: "nextcloud/talk-desktop git tag to build from."
@@ -147,7 +152,8 @@ jobs:
           body: |
             Rebranded Nextcloud Talk desktop client. Download the asset and distribute that file.
             Windows builds do not auto-update; `Gantara_Talk-*-signing.json` says whether the
-            setup is Authenticode-signed (see SIGNING.md).
+            setup is Authenticode-signed (see SIGNING.md). The macOS DMG is signed with
+            Developer ID and notarised by Apple.
           files: talk-desktop/out/appimage/*.AppImage
           fail_on_unmatched_files: true
           make_latest: false
@@ -326,7 +332,8 @@ jobs:
           body: |
             Rebranded Nextcloud Talk desktop client. Download the asset and distribute that file.
             Windows builds do not auto-update; `Gantara_Talk-*-signing.json` says whether the
-            setup is Authenticode-signed (see SIGNING.md).
+            setup is Authenticode-signed (see SIGNING.md). The macOS DMG is signed with
+            Developer ID and notarised by Apple.
           files: talk-desktop-windows-out/*
           fail_on_unmatched_files: true
           make_latest: false
@@ -339,13 +346,166 @@ jobs:
           path: talk-desktop-windows-out/*
           retention-days: 1
 
+  macos:
+    name: Rebrand + build Talk desktop (macOS DMG, universal)
+    if: github.event.inputs.platform == 'macos'
+    runs-on: macos-15
+    timeout-minutes: 120
+    permissions:
+      contents: write # publishes the GitHub release
+    env:
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+    steps:
+      - name: Checkout talk-desktop at pinned tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          repository: nextcloud/talk-desktop
+          ref: ${{ github.event.inputs.talk_desktop_ref }}
+          path: talk-desktop
+
+      - name: Checkout platform repo (branding overlay)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: platform
+
+      - name: Check the signing configuration
+        id: signing
+        env:
+          RELEASE: ${{ inputs.release }}
+          MACOS_CERTIFICATES_P12: ${{ secrets.MACOS_CERTIFICATES_P12 }}
+          MACOS_CERTIFICATES_PASSWORD: ${{ secrets.MACOS_CERTIFICATES_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+        run: bash platform/.github/scripts/macos-signing-gate.sh
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Install talk-desktop dependencies
+        working-directory: talk-desktop
+        run: npm ci
+
+      - name: Apply Gantara branding
+        run: bash platform/clients/talk-desktop/branding/apply-branding.sh "${GITHUB_WORKSPACE}/talk-desktop"
+
+      - name: Verify branding
+        run: bash platform/clients/talk-desktop/branding/verify-branding.sh "${GITHUB_WORKSPACE}/talk-desktop"
+
+      # macOS runners have no Docker, so the extraction fallback is not available here either.
+      - name: Check committed theme styles
+        working-directory: talk-desktop
+        run: |
+          node -e "
+            const { getNextcloudStyles, getNextcloudVersionForTalk } = require('./build/resolveBuildConfig.js')
+            if (!getNextcloudStyles().overridesUpToDate) {
+              console.error('::error::No up-to-date theme styles for Nextcloud ' + getNextcloudVersionForTalk() + ' in clients/talk-desktop/branding/styles. Run the refresh-talk-styles workflow for this talk_desktop_ref first.')
+              process.exit(1)
+            }
+          "
+
+      - name: Generate branded icons
+        working-directory: talk-desktop
+        run: npm run generate-icons
+
+      - name: Import the Developer ID certificates
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          MACOS_CERTIFICATES_P12: ${{ secrets.MACOS_CERTIFICATES_P12 }}
+          MACOS_CERTIFICATES_PASSWORD: ${{ secrets.MACOS_CERTIFICATES_PASSWORD }}
+        run: bash platform/clients/macos-signing.sh import
+
+      # Upstream's forge config signs (hardened runtime, @electron/osx-sign's default
+      # entitlements, which include camera and microphone) and notarises the universal app
+      # when all three APPLE_* variables are set; empty means an unsigned test build.
+      # --skip-install: the dependencies installed above are what the icons were made with.
+      - name: Build + package (macOS universal DMG)
+        working-directory: talk-desktop
+        env:
+          CHANNEL: ${{ github.event.inputs.channel }}
+          APPLE_ID: ${{ steps.signing.outputs.enabled == 'true' && secrets.APPLE_ID || '' }}
+          APPLE_ID_PASSWORD: ${{ steps.signing.outputs.enabled == 'true' && secrets.APPLE_ID_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ steps.signing.outputs.enabled == 'true' && vars.APPLE_TEAM_ID || '' }}
+        run: npm run release:package -- --mac --skip-check --skip-install
+
+      - name: Collect the DMG
+        run: |
+          set -euo pipefail
+          dmgs=()
+          while IFS= read -r f; do dmgs+=("${f}"); done < <(find talk-desktop/out/make -name '*.dmg')
+          [ "${#dmgs[@]}" -eq 1 ] || { echo "::error::Expected one .dmg under talk-desktop/out/make, found: ${dmgs[*]:-none}"; exit 1; }
+          shopt -s nullglob
+          apps=(talk-desktop/out/*-darwin-universal/*.app)
+          [ "${#apps[@]}" -eq 1 ] || { echo "::error::Expected one universal .app under talk-desktop/out, found: ${apps[*]:-none}"; exit 1; }
+          app="${apps[0]}"
+          echo "app bundle: ${app}"
+          case "$(basename "${app}")" in
+            *[Nn]extcloud*) echo "::error::Nextcloud-named app bundle survived branding: ${app}"; exit 1 ;;
+          esac
+          ls "${app}/Contents/Resources/licenses/LICENSE" "${app}/Contents/Resources/licenses/THIRD-PARTY-NOTICES.md"
+          exe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${app}/Contents/Info.plist")"
+          archs="$(lipo -archs "${app}/Contents/MacOS/${exe}")"
+          echo "architectures: ${archs}"
+          for arch in x86_64 arm64; do
+            printf '%s\n' "${archs}" | grep -qw "${arch}" || { echo "::error::the app is not universal: no ${arch}"; exit 1; }
+          done
+          mkdir -p talk-desktop-macos-out
+          cp "${dmgs[0]}" talk-desktop-macos-out/Gantara_Talk-macos-universal.dmg
+          echo "artifact: ${dmgs[0]} -> talk-desktop-macos-out/Gantara_Talk-macos-universal.dmg"
+
+      # Forge notarised and stapled the app inside; the image gets its own signature and
+      # ticket, so Gatekeeper accepts the download itself, also offline.
+      - name: Sign, notarise and staple the DMG
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+        run: |
+          set -euo pipefail
+          bash platform/clients/macos-signing.sh sign talk-desktop-macos-out/Gantara_Talk-macos-universal.dmg
+          bash platform/clients/macos-signing.sh notarize talk-desktop-macos-out/Gantara_Talk-macos-universal.dmg
+
+      - name: Verify the signatures (DMG and the app inside)
+        if: steps.signing.outputs.enabled == 'true'
+        run: bash platform/clients/macos-signing.sh verify talk-desktop-macos-out/Gantara_Talk-macos-universal.dmg
+
+      - name: Remove the signing keychain
+        if: always() && steps.signing.outputs.enabled == 'true'
+        run: bash platform/clients/macos-signing.sh cleanup
+
+      - name: Attach DMG to GitHub Release
+        if: inputs.release
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          tag_name: talk-desktop-${{ github.event.inputs.talk_desktop_ref }}
+          name: Gantara Talk desktop ${{ github.event.inputs.talk_desktop_ref }}
+          body: |
+            Rebranded Nextcloud Talk desktop client. Download the asset and distribute that file.
+            Windows builds do not auto-update; `Gantara_Talk-*-signing.json` says whether the
+            setup is Authenticode-signed (see SIGNING.md). The macOS DMG is signed with
+            Developer ID and notarised by Apple.
+          files: talk-desktop-macos-out/*
+          fail_on_unmatched_files: true
+          make_latest: false
+
+      - name: Keep the DMG as a workflow artifact (test build)
+        if: ${{ !inputs.release }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: talk-macos
+          path: talk-desktop-macos-out/*
+          retention-days: 1
+
   # Runs after whichever platform was built, so the release it attaches to exists.
-  # The tarball only depends on the commits, so a Linux and a Windows run from the
+  # The tarball only depends on the commits, so runs for different platforms from the
   # same commit upload identical bytes.
   source:
     name: Attach the source tarball
-    needs: [linux, windows]
-    if: always() && inputs.release && (needs.linux.result == 'success' || needs.windows.result == 'success')
+    needs: [linux, windows, macos]
+    if: always() && inputs.release && (needs.linux.result == 'success' || needs.windows.result == 'success' || needs.macos.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write # uploads to the release

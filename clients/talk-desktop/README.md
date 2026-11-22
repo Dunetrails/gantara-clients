@@ -48,16 +48,16 @@ clients/talk-desktop/
    ("Dunetrails Talk"), which stays the app's identity — see
    [Names and identity](#names-and-identity).
 
-The workflow then runs upstream `npm run release:package -- --linux`, which installs the
-tree (the bundled Talk web UI is the `@nextcloud/talk` npm dependency since v2.3) and
-packages the app. electron-forge has no AppImage maker, so a final `make-appimage.sh`
+The workflow then runs upstream `npm run release:package -- --linux` (or `--windows`,
+`--mac`), which installs the tree (the bundled Talk web UI is the `@nextcloud/talk` npm
+dependency since v2.3) and packages the app. electron-forge has no AppImage maker, so a final `make-appimage.sh`
 step wraps the packaged `out/<name>-linux-<arch>/` tree into a single-file `.AppImage`
 with `appimagetool`.
 
 ## Running it
 
 Actions → **Build: Gantara Talk desktop client** → *Run workflow*.
-Inputs: `platform` (`linux` or `windows`), `talk_desktop_ref` (upstream tag, default
+Inputs: `platform` (`linux`, `windows` or `macos`), `talk_desktop_ref` (upstream tag, default
 `v2.3.4`, which bundles Talk v25.0.7), and `channel` (`stable`/`beta`/`dev`, the release
 channel compiled into the app; since v2.3 the bundled Talk version is fixed by the tag).
 Installers are attached to a **GitHub Release** `talk-desktop-<ref>`. They do not count
@@ -69,7 +69,7 @@ of a version from the same commit. This repo is private; customers download from
 [`Dunetrails/gantara-clients`](https://github.com/Dunetrails/gantara-clients), where
 `publish-public-clients.yml` mirrors each release after its build, with a SHA256SUMS file
 (see the compliance checklist below). `talk-latest` there only moves to a version once it
-has both installers and the source tarball. Release cadence and how users hear about a new
+has the Windows, Linux and macOS packages and the source tarball. Release cadence and how users hear about a new
 version: [Release procedure](../desktop/README.md#release-procedure).
 
 **Licences.** `apply-branding.sh` stages [`LICENSE`](LICENSE) (AGPL-3.0),
@@ -79,11 +79,11 @@ package that folder as an `extraResource`, so every package carries it in
 `resources/licenses` next to Electron's `LICENSE` and `LICENSES.chromium.html`. Both builds
 fail if it is missing.
 
-**Windows needs current committed styles.** v2.3.x bundles Talk v25, which themes itself
-from Nextcloud 35 styles; the committed `styles/34` no longer match. Run
-**refresh-talk-styles** once (after pushing this branch, before a Windows build) — the
-Windows job checks and stops with that instruction otherwise. Linux extracts them itself
-via Docker when they are stale.
+**Windows and macOS need current committed styles.** v2.3.x bundles Talk v25, which themes
+itself from Nextcloud 35 styles; the committed `styles/34` no longer match. Run
+**refresh-talk-styles** once (after pushing this branch, before a Windows or macOS build) —
+both jobs check and stop with that instruction otherwise, since their runners have no Docker.
+Linux extracts them itself via Docker when they are stale.
 
 ## Installing / running the AppImage
 
@@ -225,14 +225,39 @@ SmartScreen hint only while it says unsigned.
 A new version means a new build here and a new file for the user.
 
 `windowsMsi` stays `false` for now (WiX Toolset on the runner + MSI path can come later).
-macOS / Flatpak remain off.
+Flatpak remains off.
+
+## Installing on macOS
+
+Download `Gantara_Talk-macos-universal.dmg`, open it and drag **Gantara Talk** onto
+*Applications*. The one DMG runs on Apple Silicon and Intel Macs. The first call asks for camera
+and microphone access; the menu-bar icon is the Gantara star.
+
+**Signing.** The job imports the Developer ID certificates from the secrets in
+[`docs/runbooks/macos-code-signing.md`](../../docs/runbooks/macos-code-signing.md) into a
+throwaway keychain ([`../macos-signing.sh`](../macos-signing.sh)). With `APPLE_ID`,
+`APPLE_ID_PASSWORD` and `APPLE_TEAM_ID` set, upstream's forge config signs the universal app with
+the hardened runtime and `@electron/osx-sign`'s default entitlements (camera, microphone, JIT) and
+has Apple notarise it. Forge does not sign the DMG, so the job signs, notarises and staples it,
+then checks the DMG and the app inside with `codesign`, `spctl` and `stapler`. There is no
+unsigned macOS release: `macos-signing-gate.sh` only allows an unsigned build with
+`release=false`, because Gatekeeper on current macOS will not open an app that is not notarised.
+
+**macOS-only overlay changes.** The `.app` is named `Gantara Talk` (see
+[Names and identity](#names-and-identity)), the DMG volume `GantaraTalk`. The DMG background,
+upstream's Nextcloud theme wallpaper, is redrawn on the brand gradient with the white logo and
+the same icon layout, rasterised at build time with the `sharp` that talk-desktop's dev
+dependencies install. The menu-bar icon is a template image, so macOS keeps only its outline:
+it gets the bare star (`talk-icon-plain-light.svg`) rather than the tile the other platforms use.
+No auto-update: as on Windows, the Update item and the release check are compiled out.
 
 ## Deliberate scope of this pipeline
 
-- **Linux AppImage + Windows Squirrel EXE (no auto-update).** `windowsExe` is `true` in
-  `build.config.json`; `windowsMsi`, `macosDmg` and `linuxFlatpak` stay `false` (the Linux
-  `.zip` maker stays enabled — the AppImage is built from the app tree it produces). Windows
-  signing as above. Flatpak is skipped to avoid `flatpak-builder` in CI.
+- **Linux AppImage + Windows Squirrel EXE + macOS universal DMG (no auto-update).**
+  `windowsExe` and `macosDmg` are `true` in `build.config.json`; `windowsMsi` and
+  `linuxFlatpak` stay `false` (the Linux `.zip` maker stays enabled — the AppImage is built
+  from the app tree it produces). Windows and macOS signing as above. Flatpak is skipped to
+  avoid `flatpak-builder` in CI.
 - **In-app theming is ON, and builds are Docker-free when the styles are current.**
   `build.config.json` sets `primaryColor`/`backgroundColor` to the Gantara blue
   (`#31469D`, the platform theme's primary), which flips
@@ -266,7 +291,11 @@ because upstream derives the executable name, the user-data directory, the Squir
 package id, the Windows AppUserModelId and the Linux app id (`dunetrails-talk`) from it;
 renaming it would log every user out and split the dock/notification identity. So the
 overlay injects `displayName` into the compiled-in build config as the name the app shows,
-and keeps the identity values derived from `applicationName`.
+and keeps the identity values derived from `applicationName`. macOS is the exception for the
+bundle name: Finder, the Dock and the menu bar show it, and there are no earlier macOS installs
+to keep, so the `.app` is `Gantara Talk.app`. Its bundle id (`com.dunetrails.talk.mac`) and
+settings directory (`~/Library/Application Support/Dunetrails Talk`, from `productName`) follow
+the same identity rule as elsewhere.
 
 **Rebranded:** app name, installer/zip name, window title, company/copyright metadata
 (`vendorName` Gantara), app IDs, the app + tray icons, the splash `brandColor`/gradient,
