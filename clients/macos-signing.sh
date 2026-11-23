@@ -23,7 +23,9 @@
 #   macos-signing.sh verify <file>...
 #       .app: deep strict signature check, hardened runtime, team, Gatekeeper and the stapled
 #       ticket. .dmg: the image's own signature and ticket, then every .app inside it. .pkg:
-#       installer signature, Gatekeeper and ticket. Fails on the first problem.
+#       installer signature, Gatekeeper and ticket, then every .app in its payload (without
+#       the stapler check: only the package carries the ticket, so Gatekeeper's online check
+#       is what proves those were notarised). Fails on the first problem.
 #   macos-signing.sh cleanup
 #       Deletes the keychain again.
 #
@@ -137,6 +139,7 @@ do_notarize() {
   done
 }
 
+# verify_app <app> [unstapled]
 verify_app() {
   local app="$1" details
   codesign --verify --deep --strict --verbose=2 "${app}"
@@ -148,7 +151,7 @@ verify_app() {
   printf '%s\n' "${details}" | grep -Eq '^CodeDirectory .*flags=0x[0-9a-f]*\(.*runtime' ||
     die "${app} is not signed with the hardened runtime (notarisation requires it)"
   spctl --assess --type execute --verbose=4 "${app}"
-  xcrun stapler validate "${app}"
+  [ "${2:-}" = unstapled ] || xcrun stapler validate "${app}"
   echo "verified ${app}: $(printf '%s\n' "${details}" | grep -m1 '^Authority=')"
 }
 
@@ -183,6 +186,15 @@ do_verify() {
           die "${f} is not signed with a Developer ID Installer certificate of team ${APPLE_TEAM_ID}"
         spctl --assess --type install --verbose=4 "${f}"
         xcrun stapler validate "${f}"
+        mnt="$(mktemp -d)"
+        pkgutil --expand-full "${f}" "${mnt}/expanded" >/dev/null
+        apps="$(find "${mnt}/expanded" -type d -name '*.app' -prune)"
+        if [ -z "${apps}" ]; then
+          rm -rf "${mnt}"
+          die "${f} contains no .app"
+        fi
+        while IFS= read -r a; do verify_app "${a}" unstapled; done <<<"${apps}"
+        rm -rf "${mnt}"
         ;;
       *) die "verify: do not know how to check ${f}" ;;
     esac

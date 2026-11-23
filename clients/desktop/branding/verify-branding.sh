@@ -9,7 +9,8 @@
 # Three things are checked: that the branding landed, that the artwork was
 # replaced, and that nothing carrying the mark is left where a user could see
 # it. The last one is deliberately blunt — every case-insensitive "nextcloud"
-# in the Linux source, the theme and the packaging counts as a failure unless
+# in the source each platform compiles, the theme and the packaging (one sweep
+# for Linux/Windows, one for macOS) counts as a failure unless
 # it matches KEEP below. Adding to KEEP is a decision to ship that occurrence,
 # so every entry says why it is safe.
 
@@ -68,6 +69,23 @@ expect_in_file gantara-licenses/LICENSES/LGPL-3.0-or-later.txt "GNU LESSER GENER
     "Qt's licence (LGPL-3.0) staged"
 expect_in_file gantara-licenses/LICENSES/Apache-2.0.txt "Apache License" \
     "OpenSSL's licence (Apache-2.0) staged"
+expect_in_file CMakeLists.txt '"${OWNCLOUD_OSX_BUNDLE}/Contents/Resources/licenses"' \
+    "licences and notices installed inside the macOS app bundle"
+
+# macOS: our Team ID in the line mac-crafter reads (the first one), passed on to
+# the Finder extension build, and the Dock tile wired up for Apple builds.
+team_line="$(grep -m1 -E '^[[:space:]]*set\([[:space:]]*DEVELOPMENT_TEAM' NEXTCLOUD.cmake || true)"
+case "${team_line}" in
+    *"\"${MACOS_DEVELOPMENT_TEAM}\""*) pass "Apple Team ID is ours (${MACOS_DEVELOPMENT_TEAM})" ;;
+    *) fail "first DEVELOPMENT_TEAM in NEXTCLOUD.cmake is not ${MACOS_DEVELOPMENT_TEAM}: ${team_line}" ;;
+esac
+expect_in_file shell_integration/MacOSX/CMakeLists.txt '"DEVELOPMENT_TEAM=${DEVELOPMENT_TEAM}"' \
+    "Team ID passed to the Finder extension build"
+expect_in_file NEXTCLOUD.cmake "set( APPLICATION_ICON_NAME \"${APPLICATION_ICON_NAME}-macOS\" )" \
+    "macOS builds use the rounded-square app icon"
+expect_in_file cmake/modules/MacOSXBundleInfo.plist.in \
+    "@APPLICATION_NAME@ needs access to your local network" \
+    "macOS local-network permission prompt names the product"
 
 # Identities that upstream derives from the display name, pinned to the short
 # name so renaming the product does not orphan existing installs.
@@ -108,6 +126,7 @@ expect_in_file src/gui/CMakeLists.txt 'if(APPLICATION_NAME STREQUAL "Nextcloud"'
 # apply-branding.sh stamps data-brand="gantara" on every SVG it writes, which is
 # what proves the upstream vector logo is gone rather than merely renamed.
 for svg in "theme/colored/${APPLICATION_ICON_NAME}-icon.svg" \
+           "theme/colored/${APPLICATION_ICON_NAME}-macOS-icon.svg" \
            theme/colored/wizard_logo.svg \
            "theme/colored/${APPLICATION_ICON_NAME}-w10startmenu.svg" \
            "theme/colored/icons/${APPLICATION_ICON_NAME}-icon-win-folder.svg"; do
@@ -138,6 +157,13 @@ for flavor in colored black white; do
     done
 done
 [ "${missing_slides}" -eq 0 ] && pass "wizard slide bitmaps written for every flavour"
+
+if [ -s admin/osx/installer-background.png ] && [ -s admin/osx/installer-background_2x.png ] \
+        && [ ! -e admin/osx/installer-background.svg ] && [ ! -e admin/osx/DMGBackground.png ]; then
+    pass "macOS installer artwork replaced"
+else
+    fail "macOS installer artwork not replaced (admin/osx/installer-background*, DMGBackground.png)"
+fi
 
 leftover_logos="$(find theme -name 'Nextcloud-*' -print -o -type d -name 'nextcloud' -print 2>/dev/null)"
 if [ -z "${leftover_logos}" ]; then
@@ -210,8 +236,13 @@ KEEP=(
     'wizard-?[Nn]extcloud'
 
     # macOS file-provider headers referenced from shared sources; we do not
-    # build or ship those modules.
+    # build or ship those modules. The Finder extension lives in the same
+    # NextcloudIntegration Xcode project, a source path nobody sees.
     'Nextcloud(Integration|FileProviderKit|FileProviderXPC)'
+
+    # Label of a dispatch queue inside the Finder extension; only debuggers and
+    # crash reports show it.
+    'com\.nextcloud\.FinderSync\.XPCQueue'
 
     # Unused WiX/MSI source filename mentioned in a Windows comment. Craft
     # packages NSIS; BUILD_WIN_MSI stays off.
@@ -249,6 +280,36 @@ if [ -z "${hits}" ]; then
     pass "no user-visible Nextcloud mark in the Linux/Windows source, theme or packaging"
 else
     fail "user-visible Nextcloud marks left behind:"$'\n'"${hits}"
+fi
+
+# macOS scope: the Cocoa sources the bundle compiles, the Finder extension and
+# its broker, the configured plists, entitlements and installer scripts. Out of
+# scope are the File Provider module (BUILD_FILE_PROVIDER_MODULE stays off), the
+# updater, the Packages project (we package with pkgbuild) and the symlinks into
+# the File Provider sources (find -type f skips them).
+mac_files="$(
+    {
+        find src -type f \( -name '*_mac*.cpp' -o -name '*_mac*.h' -o -name '*.mm' -o -name '*.m' \)
+        find src/gui/macOS -type f
+        find shell_integration/MacOSX/NextcloudIntegration/FinderSyncExt \
+             shell_integration/MacOSX/NextcloudIntegration/FinderSyncBroker -type f
+        find admin/osx shell_integration/MacOSX -maxdepth 1 -type f -name '*.cmake'
+        echo cmake/modules/MacOSXBundleInfo.plist.in
+    } | grep -v -i -E 'fileprovider|\.license$|\.pkgproj\.cmake$|^src/gui/updater/' | sort -u
+)"
+[ -n "${mac_files}" ] || fail "macOS sweep found no files (upstream moved them?)"
+mac_hits="$(
+    printf '%s\n' "${mac_files}" | tr '\n' '\0' | xargs -0 grep -Hn -i -E 'nextcloud' 2>/dev/null \
+    | grep -v -E ':[0-9]+:[[:space:]]*(//|\*|/\*|#|<!--)' \
+    | sed -e 's: //.*::' \
+    | grep -i -E 'nextcloud' \
+    | grep -v -E "${keep_re}" \
+    || true
+)"
+if [ -z "${mac_hits}" ]; then
+    pass "no user-visible Nextcloud mark in the macOS sources, Finder extension or bundle metadata ($(printf '%s\n' "${mac_files}" | wc -l | tr -d ' ') files)"
+else
+    fail "user-visible Nextcloud marks left behind (macOS):"$'\n'"${mac_hits}"
 fi
 
 # The translation catalogues lag the source: they still carry <source> entries

@@ -15,16 +15,24 @@ name: "Build: Gantara desktop sync client"
 #     windows-build-and-test.yml), plus Gantara_Desktop-<version>-signing.json
 #     saying whether it is Authenticode-signed. Signed with Azure Artifact
 #     Signing once the repo variables in SIGNING.md are set, unsigned until then.
-#   - Both: Gantara_Desktop-<version>-source.tar.gz (clients/make-source-tarball.sh),
+#   - macOS: Gantara_Desktop-<version>-macos-universal.pkg. KDE Craft builds the app
+#     natively on an Apple Silicon and an Intel runner, the way upstream's mac-crafter
+#     does (clients/desktop/branding/build-macos.sh); upstream's make_universal.py
+#     merges the two, mac-crafter signs the result with Developer ID, and
+#     make-macos-pkg.sh wraps it in an installer that is signed, notarised and
+#     stapled. Classic Finder sync only, no File Provider. Signing needs the secrets
+#     in docs/runbooks/macos-code-signing.md, including MACOS_INSTALLER_P12, and
+#     runs on main only; without it only an unsigned test build (release=false).
+#   - All: Gantara_Desktop-<version>-source.tar.gz (clients/make-source-tarball.sh),
 #     the corresponding source of the packages, attached by the source job.
 #
-# Manual trigger. Pick Linux or Windows per run. The package is attached to a
+# Manual trigger. Pick one platform per run. The package is attached to a
 # GitHub Release, which is a browser download and does not consume Actions
 # artifact storage. With release=false it is kept as a one-day workflow
 # artifact instead, and no release changes.
 #
-# Deliberately out of scope: macOS packages and an update server — the client
-# is built with the updater compiled out.
+# Deliberately out of scope: an update server — the client is built with the
+# updater compiled out on every platform.
 #
 # This workflow does not touch the Talk client; that is build-talk-desktop.yml.
 
@@ -38,6 +46,7 @@ on:
         options:
           - linux
           - windows
+          - macos
         default: windows
       desktop_ref:
         description: "nextcloud/desktop tag to build. apply-branding.sh is written against v35.0.x — see clients/desktop/README.md."
@@ -48,7 +57,7 @@ on:
         required: true
         default: "ghcr.io/nextcloud/continuous-integration-client-appimage-qt6:client-appimage-el9-6.11.2-5"
       craft_blueprint_branch:
-        description: "Optional override for both Craft blueprint branches. Empty uses the tag's craftmaster.ini. Used when platform=windows."
+        description: "Optional override for both Craft blueprint branches. Empty uses the tag's craftmaster.ini. Used when platform=windows (macOS always uses craftmaster.ini)."
         required: false
         default: ""
       release:
@@ -146,6 +155,8 @@ jobs:
             Linux: install with `clients/install-appimage.sh`.
             Windows: NSIS setup; `Gantara_Desktop-*-signing.json` says whether
             it is Authenticode-signed (see SIGNING.md).
+            macOS: one installer for Apple Silicon and Intel (macOS 13 or later),
+            signed with Developer ID (Dunetrails) and notarised by Apple.
             The client does not check for updates; a new version means a new
             build here.
           files: desktop/${{ steps.package.outputs.name }}
@@ -280,6 +291,8 @@ jobs:
             Linux: install with `clients/install-appimage.sh`.
             Windows: NSIS setup; `Gantara_Desktop-*-signing.json` says whether
             it is Authenticode-signed (see SIGNING.md).
+            macOS: one installer for Apple Silicon and Intel (macOS 13 or later),
+            signed with Developer ID (Dunetrails) and notarised by Apple.
             The client does not check for updates; a new version means a new
             build here.
           files: desktop-windows-out/*
@@ -294,13 +307,259 @@ jobs:
           path: desktop-windows-out/*
           retention-days: 1
 
+  # Before the hours of building: a release run without working signing fails here.
+  macos-signing:
+    name: Check the macOS signing configuration
+    if: github.event.inputs.platform == 'macos'
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - name: Check out this repo (branding overlay)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: platform
+
+      # The Team ID in branding.env is built into the app group and the Finder broker's
+      # bundle id, so it has to be the team that signs. A .pkg also needs the Installer
+      # certificate.
+      - name: Check the signing configuration
+        id: gate
+        env:
+          RELEASE: ${{ inputs.release }}
+          MACOS_NEEDS_INSTALLER: "true"
+          MACOS_CERTIFICATES_P12: ${{ secrets.MACOS_CERTIFICATES_P12 }}
+          MACOS_INSTALLER_P12: ${{ secrets.MACOS_INSTALLER_P12 }}
+          MACOS_CERTIFICATES_PASSWORD: ${{ secrets.MACOS_CERTIFICATES_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          BUILD_TEAM_ID="$(. platform/clients/desktop/branding/branding.env && printf '%s' "${MACOS_DEVELOPMENT_TEAM}")"
+          export BUILD_TEAM_ID
+          bash platform/.github/scripts/macos-signing-gate.sh
+
+  # One native build per architecture, as upstream does: macdeployqt does not handle
+  # universal builds, so the two apps are merged afterwards. No secrets in these jobs.
+  macos-app:
+    name: Rebrand and build macOS app (${{ matrix.arch }})
+    needs: macos-signing
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - name: Check out this repo (branding overlay)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: platform
+
+      - name: Check out nextcloud/desktop at the pinned tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          repository: nextcloud/desktop
+          ref: ${{ github.event.inputs.desktop_ref }}
+          submodules: recursive
+          path: desktop
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      # Inkscape rasterises the icons during the build, as in upstream's macOS CI. The GNU
+      # tools are for apply-branding.sh only, which is written for GNU sed and mktemp.
+      - name: Install build tools
+        run: |
+          brew install gnu-sed coreutils grep
+          brew install --cask inkscape
+
+      # Only this step sees the GNU tools first on PATH; Craft and Xcode keep the BSD ones.
+      - name: Apply Gantara branding
+        run: |
+          gnu="$(brew --prefix gnu-sed)/libexec/gnubin:$(brew --prefix coreutils)/libexec/gnubin:$(brew --prefix grep)/libexec/gnubin"
+          PATH="${gnu}:${PATH}" bash platform/clients/desktop/branding/apply-branding.sh "${GITHUB_WORKSPACE}/desktop"
+
+      - name: Build the app (Craft)
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: bash platform/clients/desktop/branding/build-macos.sh "${GITHUB_WORKSPACE}/desktop" "${ARCH}" "${GITHUB_WORKSPACE}/macos-out"
+
+      - name: Hand the app to the packaging job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-macos-app-${{ matrix.arch }}
+          path: macos-out/
+          if-no-files-found: error
+          retention-days: 1
+
+  macos:
+    name: Universal app, sign, package and notarise (.pkg)
+    needs: [macos-signing, macos-app]
+    runs-on: macos-15
+    timeout-minutes: 120
+    permissions:
+      contents: write # publishes the GitHub release
+    env:
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      SIGNING: ${{ needs.macos-signing.outputs.enabled }}
+    steps:
+      - name: Check out this repo (branding overlay)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: platform
+
+      # For upstream's make_universal.py and mac-crafter (the signer).
+      - name: Check out nextcloud/desktop at the pinned tag (admin/osx)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          repository: nextcloud/desktop
+          ref: ${{ github.event.inputs.desktop_ref }}
+          sparse-checkout: admin/osx
+          path: desktop
+
+      - name: Fetch the two builds
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: desktop-macos-app-*
+          path: macos-in
+
+      # Before signing: lipo rewrites the binaries, which would invalidate a signature.
+      - name: Merge them into one universal app
+        id: app
+        run: |
+          set -euo pipefail
+          . platform/clients/desktop/branding/branding.env
+          for arch in arm64 x86_64; do
+            mkdir -p "work/${arch}"
+            tar -xf "macos-in/desktop-macos-app-${arch}/app.tar" -C "work/${arch}"
+          done
+          python3 desktop/admin/osx/make_universal.py \
+            "work/x86_64/${APPLICATION_NAME}.app" "work/arm64/${APPLICATION_NAME}.app" work/universal
+          app="work/universal/${APPLICATION_NAME}.app"
+          # make_universal.py carries on when a lipo fails, so check every Mach-O file.
+          thin="$(find "${app}" -type f -exec file {} + | grep 'Mach-O' | grep -v -e 'universal binary' -e '(for architecture' || true)"
+          if [ -n "${thin}" ]; then
+            echo "::error::Not universal (only one architecture):"
+            printf '%s\n' "${thin}"
+            exit 1
+          fi
+          echo "universal: $(lipo -archs "${app}/Contents/MacOS/${APPLICATION_NAME}")"
+          echo "app=${app}" >>"${GITHUB_OUTPUT}"
+
+      - name: Import the Developer ID certificates
+        if: env.SIGNING == 'true'
+        env:
+          MACOS_CERTIFICATES_P12: ${{ secrets.MACOS_CERTIFICATES_P12 }}
+          MACOS_INSTALLER_P12: ${{ secrets.MACOS_INSTALLER_P12 }}
+          MACOS_CERTIFICATES_PASSWORD: ${{ secrets.MACOS_CERTIFICATES_PASSWORD }}
+        run: bash platform/clients/macos-signing.sh import
+
+      # mac-crafter signs inside-out with the hardened runtime: the Finder broker and
+      # extension with their entitlements, the frameworks, the dylibs in MacOS/ and PlugIns/,
+      # then the app with the sandbox entitlements the build configured. It does not look
+      # in Resources/, so any Mach-O file there (QML plugins) is signed first.
+      - name: Sign the app (Developer ID)
+        if: env.SIGNING == 'true'
+        env:
+          APP: ${{ steps.app.outputs.app }}
+          STAGE: macos-in/desktop-macos-app-arm64
+        run: |
+          set -euo pipefail
+          . platform/clients/desktop/branding/branding.env
+          swift build -c release --package-path desktop/admin/osx/mac-crafter
+          find "${APP}/Contents/Resources" -type f -print0 | while IFS= read -r -d '' f; do
+            if file -b "${f}" | grep -q '^Mach-O'; then
+              codesign --force --timestamp --options=runtime --sign "${MACOS_SIGN_IDENTITY}" "${f}"
+            fi
+          done
+          desktop/admin/osx/mac-crafter/.build/release/mac-crafter codesign "${APP}" "${MACOS_SIGN_IDENTITY}" \
+            "${STAGE}/macosx.entitlements" none none "${STAGE}/FinderSyncExt.entitlements"
+          codesign -d --entitlements :- "${APP}" 2>/dev/null | grep -qF "${APPLE_TEAM_ID}.${APPLICATION_REV_DOMAIN}" \
+            || { echo "::error::the signed app does not claim the ${APPLE_TEAM_ID}.${APPLICATION_REV_DOMAIN} app group"; exit 1; }
+
+      - name: Build the installer package
+        id: package
+        env:
+          APP: ${{ steps.app.outputs.app }}
+          STAGE: macos-in/desktop-macos-app-arm64
+          DESKTOP_REF: ${{ github.event.inputs.desktop_ref }}
+        run: |
+          set -euo pipefail
+          pkg="desktop-macos-out/Gantara_Desktop-${DESKTOP_REF#v}-macos-universal.pkg"
+          bash platform/clients/desktop/branding/make-macos-pkg.sh "${APP}" "${STAGE}" "${DESKTOP_REF#v}" "${pkg}"
+          echo "pkg=${pkg}" >>"${GITHUB_OUTPUT}"
+          ls -l "${pkg}"
+
+      # Apple notarises the package and everything in it; the ticket is stapled to the
+      # package, so Gatekeeper accepts the download also offline.
+      - name: Notarise and staple the package
+        if: env.SIGNING == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          PKG: ${{ steps.package.outputs.pkg }}
+        run: bash platform/clients/macos-signing.sh notarize "${PKG}"
+
+      - name: Verify the signatures (package and the app inside)
+        if: env.SIGNING == 'true'
+        env:
+          PKG: ${{ steps.package.outputs.pkg }}
+        run: bash platform/clients/macos-signing.sh verify "${PKG}"
+
+      - name: Remove the signing keychain
+        if: always() && env.SIGNING == 'true'
+        run: bash platform/clients/macos-signing.sh cleanup
+
+      - name: Attach the package to the GitHub Release
+        if: inputs.release
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          tag_name: desktop-${{ github.event.inputs.desktop_ref }}
+          name: Gantara Desktop ${{ github.event.inputs.desktop_ref }}
+          body: |
+            Gantara-branded build of the Nextcloud desktop sync client
+            ${{ github.event.inputs.desktop_ref }}.
+
+            Linux: install with `clients/install-appimage.sh`.
+            Windows: NSIS setup; `Gantara_Desktop-*-signing.json` says whether
+            it is Authenticode-signed (see SIGNING.md).
+            macOS: one installer for Apple Silicon and Intel (macOS 13 or later),
+            signed with Developer ID (Dunetrails) and notarised by Apple.
+            The client does not check for updates; a new version means a new
+            build here.
+          files: desktop-macos-out/*
+          fail_on_unmatched_files: true
+          make_latest: false
+
+      - name: Keep the package as a workflow artifact (test build)
+        if: ${{ !inputs.release }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-macos
+          path: desktop-macos-out/*
+          retention-days: 1
+
   # Runs after whichever platform was built, so the release it attaches to exists.
-  # The tarball only depends on the two commits, so a Linux and a Windows run from
+  # The tarball only depends on the two commits, so runs for different platforms from
   # the same commit upload identical bytes.
   source:
     name: Attach the source tarball
-    needs: [appimage, windows]
-    if: always() && inputs.release && (needs.appimage.result == 'success' || needs.windows.result == 'success')
+    needs: [appimage, windows, macos]
+    if: always() && inputs.release && (needs.appimage.result == 'success' || needs.windows.result == 'success' || needs.macos.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write # uploads to the release

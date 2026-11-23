@@ -18,9 +18,10 @@
 # those lookups are pinned to APPLICATION_SHORTNAME, which keeps the original
 # name. Existing installs keep their accounts and sync folders.
 #
-# Linux and Windows share this overlay. Windows-only work is the shell-extension
-# GUIDs, the Start-tile manifest, and the NSIS installer icon; the rest of the
-# rewrites land in both builds.
+# Linux, Windows and macOS share this overlay. Windows-only work is the
+# shell-extension GUIDs, the Start-tile manifest, and the NSIS installer icon;
+# macOS-only work is the Apple Team ID, the Dock tile, the installer artwork and
+# a few strings in the Cocoa sources. The rest of the rewrites land in every build.
 
 set -euo pipefail
 
@@ -71,6 +72,8 @@ for asset in "${LOGO_ICO}" "${STAR_COLOR}" "${HORIZONTAL_COLOR}" "${HORIZONTAL_O
 done
 [ "${APPLICATION_SHORTNAME}" = "Dunetrails" ] \
     || die "APPLICATION_SHORTNAME must stay Dunetrails: it names existing installs' settings and sync roots"
+[[ "${MACOS_DEVELOPMENT_TEAM:-}" =~ ^[A-Z0-9]{10}$ ]] \
+    || die "MACOS_DEVELOPMENT_TEAM must be the 10-character Apple Team ID"
 
 # The rewrites consume their anchors, so a second pass would fail confusingly
 # partway through. Say so up front instead.
@@ -129,6 +132,13 @@ set( WIN_MSI_UPGRADE_CODE                "${WIN_MSI_UPGRADE_CODE}" )
 # quietly build an updater that would poll APPLICATION_UPDATE_URL.
 set( BUILD_UPDATER OFF )
 
+# macOS: the Dock wants a rounded-square tile rather than the bare star, so Apple builds
+# take theme/colored/${APPLICATION_ICON_NAME}-macOS-icon.svg (upstream does the same for
+# its own build). It becomes the .icns and the Finder extension's icon.
+if(APPLE)
+    set( APPLICATION_ICON_NAME "${APPLICATION_ICON_NAME}-macOS" )
+endif()
+
 # THEME_CLASS is deliberately left as NextcloudTheme: it is a C++ class name
 # referenced across the source, not a string anyone sees.
 EOF
@@ -147,6 +157,16 @@ rewrite "${DESKTOP}/CMakeLists.txt" \
 rewrite "${DESKTOP}/CMakeLists.txt" \
     'set( CFAPI_SHELLEXT_THUMBNAIL_HANDLER_CLASS_ID "6FF9B5B6-389F-444A-9FDD-A286C36EA079" )' \
     "set( CFAPI_SHELLEXT_THUMBNAIL_HANDLER_CLASS_ID \"${CFAPI_SHELLEXT_THUMBNAIL_HANDLER_CLASS_ID}\" )"
+
+# --------------------------------------------------------------------------
+step "macOS Team ID"
+# --------------------------------------------------------------------------
+# Upstream builds its Team ID into the app group and the Finder broker's bundle
+# id, and mac-crafter reads it from the first DEVELOPMENT_TEAM line of this file,
+# so the line itself is rewritten rather than overridden below it.
+rewrite "${DESKTOP}/NEXTCLOUD.cmake" \
+    'set( DEVELOPMENT_TEAM "NKUJUXUJ3B" CACHE STRING "Apple Development Team ID" )' \
+    "set( DEVELOPMENT_TEAM \"${MACOS_DEVELOPMENT_TEAM}\" CACHE STRING \"Apple Development Team ID\" )"
 
 # --------------------------------------------------------------------------
 step "Identity lookups pinned to APPLICATION_SHORTNAME"
@@ -349,6 +369,42 @@ need_file "${DESKTOP}/admin/win/nsi/installer.ico"
 cp -f "${LOGO_ICO}" "${DESKTOP}/admin/win/nsi/installer.ico"
 printf '    admin/win/nsi/installer.ico (NSIS / setup icon)\n'
 
+# macOS Dock / Finder icon: the colour star on a light rounded-square tile laid
+# out on Apple's 1024 grid (824 tile, 100 margin for the shadow). The override
+# block points Apple builds at this file.
+cat >"${THEME}/colored/${APPLICATION_ICON_NAME}-macOS-icon.svg" <<EOF
+<svg xmlns="http://www.w3.org/2000/svg" data-brand="gantara" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+<linearGradient id="gantara-tile" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#ECEFF4"/>
+</linearGradient>
+<filter id="gantara-shadow" x="-10%" y="-10%" width="120%" height="125%">
+<feGaussianBlur in="SourceAlpha" stdDeviation="14"/><feOffset dy="10"/>
+<feComponentTransfer><feFuncA type="linear" slope="0.3"/></feComponentTransfer>
+<feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+</filter>
+</defs>
+<rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#gantara-tile)" filter="url(#gantara-shadow)"/>
+$(nested_logo "${STAR_COLOR}" 232 232 560 560)
+</svg>
+EOF
+printf '    theme/colored/%s-macOS-icon.svg (macOS app icon)\n' "${APPLICATION_ICON_NAME}"
+
+# macOS installer background (bottom-left of the Installer window), in place of
+# upstream's white Nextcloud logo. The pkg build combines the two sizes into one
+# HiDPI image. The DMG background is the Nextcloud logo too and is not used.
+need_file "${DESKTOP}/admin/osx/installer-background.png"
+INSTALLER_BG="$(mktemp --suffix=.svg)"
+cat >"${INSTALLER_BG}" <<EOF
+<svg xmlns="http://www.w3.org/2000/svg" data-brand="gantara" width="200" height="200" viewBox="0 0 200 200">
+$(nested_logo "${STAR_COLOR}" 24 56 120 120)
+</svg>
+EOF
+rasterise "${INSTALLER_BG}" 200 200 "${DESKTOP}/admin/osx/installer-background.png"
+rasterise "${INSTALLER_BG}" 400 400 "${DESKTOP}/admin/osx/installer-background_2x.png"
+rm -f "${INSTALLER_BG}" "${DESKTOP}/admin/osx/installer-background.svg" "${DESKTOP}/admin/osx/DMGBackground.png"
+printf '    admin/osx/installer-background{,_2x}.png (macOS installer)\n'
+
 # --------------------------------------------------------------------------
 step "AppImage build script"
 # --------------------------------------------------------------------------
@@ -441,6 +497,20 @@ rewrite "${DESKTOP}/src/gui/assistant/qml/AssistantMessageList.qml" \
     "Start a conversation with Nextcloud Assistant." \
     "Start a conversation with ${APPLICATION_NAME} Assistant."
 
+# macOS. The reply field of a Talk notification (no catalogue carries this
+# string, so nothing to move in the translations), the local-network permission
+# prompt, the Finder menu title when the extension cannot read its own name, and
+# the installer's log prefix in /var/log/install.log.
+rewrite "${DESKTOP}/src/gui/systray_mac_usernotifications.mm" \
+    'QObject::tr("Send a Nextcloud Talk reply")' 'QObject::tr("Send a reply")'
+rewrite "${DESKTOP}/cmake/modules/MacOSXBundleInfo.plist.in" \
+    "Nextcloud needs access to your local network to connect to Nextcloud servers hosted there." \
+    "@APPLICATION_NAME@ needs access to your local network to connect to servers hosted there."
+rewrite "${DESKTOP}/shell_integration/MacOSX/NextcloudIntegration/FinderSyncExt/FinderSync.m" \
+    '?: @"Nextcloud";' "?: @\"${APPLICATION_NAME}\";"
+rewrite "${DESKTOP}/admin/osx/post_install.sh.cmake" \
+    'LOG_PREFIX="Nextcloud FinderSync:"' "LOG_PREFIX=\"${APPLICATION_NAME} FinderSync:\""
+
 # --------------------------------------------------------------------------
 step "Translations"
 # --------------------------------------------------------------------------
@@ -495,9 +565,10 @@ step "Licences and notices"
 # LGPL, not OpenSSL's Apache licence. The GPL and LGPL require one with every
 # copy, so the client's COPYING, the third-party notices and the licence texts
 # they cite are installed with the client: into share/<executable>/licenses on
-# Linux (build-appimage.sh moves share/<executable> into the AppImage) and
+# Linux (build-appimage.sh moves share/<executable> into the AppImage),
 # licenses\ beside bin\ on Windows (Craft packages the whole install prefix;
-# its blacklist does not touch that folder).
+# its blacklist does not touch that folder), and Contents/Resources/licenses
+# inside the app bundle on macOS, where only the bundle is shipped.
 CLIENT_DIR="$(cd -- "${BRANDING_DIR}/.." && pwd)"
 LICENSES_DIR="$(cd -- "${BRANDING_DIR}/../../LICENSES" && pwd)"
 LICENSE_STAGE="${DESKTOP}/gantara-licenses"
@@ -512,6 +583,8 @@ cat >>"${DESKTOP}/CMakeLists.txt" <<'EOF'
 # ---- Gantara licences and notices (clients/desktop/branding/apply-branding.sh)
 if(WIN32)
     set(GANTARA_LICENSE_DIR "licenses")
+elseif(APPLE AND BUILD_OWNCLOUD_OSX_BUNDLE)
+    set(GANTARA_LICENSE_DIR "${OWNCLOUD_OSX_BUNDLE}/Contents/Resources/licenses")
 else()
     set(GANTARA_LICENSE_DIR "${CMAKE_INSTALL_DATADIR}/${APPLICATION_EXECUTABLE}/licenses")
 endif()
