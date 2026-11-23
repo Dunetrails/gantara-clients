@@ -8,9 +8,10 @@ distribute may not carry the Nextcloud name or logo, and must not look like the 
 one. For a Community client we hand to customers, rebranding is the compliant path, not a
 preference.
 
-This directory turns the Linux and Windows sync client into **Gantara** and
+This directory turns the Linux, Windows and macOS sync client into **Gantara** and
 nothing else. No features are added, removed or changed — same code, different
-name, artwork and links. Windows builds are signed once Azure Artifact Signing is set up.
+name, artwork and links. Windows builds are signed once Azure Artifact Signing is set up;
+macOS builds are always signed with Developer ID and notarised.
 
 The client first shipped as *Dunetrails*. Only what users see moved to Gantara: the
 settings directory, keychain entries, autostart entry, executable, `.desktop` / D-Bus
@@ -41,6 +42,8 @@ clients/desktop/
     verify-branding.sh       <- compliance sweep; fails the build on a leftover
     build-windows.ps1        <- Craft-based Windows NSIS package (signed when configured)
     build-windows-local.ps1  <- full local VM build (prereqs + clone + package)
+    build-macos.sh           <- Craft-based macOS app bundle, one architecture per run
+    make-macos-pkg.sh        <- the macOS installer (.pkg) around the universal app
     assets/gantara-*.svg     <- brand vectors: colour star, horizontal logo (light/dark)
     assets/logo.png          <- the colour star as PNG, for the NSIS installer
     assets/logo.ico          <- the brand app icon for Windows NSIS / shortcuts
@@ -50,7 +53,7 @@ clients/
   install-appimage.sh        <- per-user install / --uninstall / --purge
   reset-linux-clients.sh     <- wipe all client state from a Linux account
 .github/workflows/
-  build-desktop-client.yml   <- manual workflow: Linux AppImage + Windows NSIS
+  build-desktop-client.yml   <- manual workflow: Linux AppImage, Windows NSIS, macOS .pkg
 ```
 
 ## What gets changed
@@ -107,9 +110,20 @@ loads by a fixed `.png` name. The wizard logo and the old wizard's slides get th
 horizontal logo at their 2:1 aspect, with the light-text variant for dark windows. v35's
 QML wizard shows none of them, but they are still compiled in. On Windows the Start
 tile (`<executable>.VisualElementsManifest.xml` plus the `w10startmenu` SVG), the
-folder icon and the NSIS `installer.ico` are the same star. Unreferenced Nextcloud logo
-artwork, including the macOS Icon Composer bundle, is deleted from the tree rather than
-left to rely on its code path staying dead.
+folder icon and the NSIS `installer.ico` are the same star. On macOS the Dock wants a
+rounded-square tile, so Apple builds take the star on a light tile (`<icon name>-macOS-icon.svg`,
+upstream does the same for its own build), which also becomes the Finder extension's icon;
+the installer shows a small star where upstream had the white Nextcloud logo. Unreferenced
+Nextcloud logo artwork, including the macOS Icon Composer bundle and the unused DMG
+background, is deleted from the tree rather than left to rely on its code path staying dead.
+
+**macOS.** Upstream builds its Apple Team ID into the app group and the Finder broker's
+bundle id (`<team>.com.dunetrails.desktopclient…`), so `branding.env` carries ours
+(`MACOS_DEVELOPMENT_TEAM`), rewritten in place in `NEXTCLOUD.cmake` because mac-crafter
+reads the first definition. It must be the team that signs; the workflow checks. Four
+strings in the Cocoa sources name Nextcloud and are rewritten: the reply field of a Talk
+notification, the local-network permission prompt in `Info.plist`, the Finder menu's
+fallback title, and the installer's log prefix.
 
 The tray status icons need no work: upstream's own build switches from its logo-shaped
 icons to plain status glyphs as soon as `APPLICATION_NAME` stops being "Nextcloud".
@@ -134,7 +148,8 @@ Qt's LGPL, not OpenSSL's Apache licence. `apply-branding.sh` stages
 (every bundled library, its licence and project, and a written offer for the source) and the
 licence texts in [`../LICENSES`](../LICENSES) into the tree, and adds a cmake `install()` rule
 for them: `licenses\` in the install folder on Windows, `usr/share/dunetrails/licenses` in the
-AppImage. Both builds check the files made it into the package. The notices list was taken
+AppImage, `Contents/Resources/licenses` inside the macOS app. Every build checks the files
+made it into the package. The notices list was taken
 from the v35.0.0 packages; compare it with `bin\*.dll` and `usr/lib` on a major bump.
 
 ## What is deliberately left alone
@@ -165,8 +180,11 @@ explicitly allowed, and each entry in that list says why. The categories:
   proves it rather than assuming it: it checks that no such source text is a literal the
   rebranded code still asks for.
 
-Also out of scope by the same logic: macOS sources and upstream's Debian/PPA publishing
-scripts. None of those is built or installed here.
+The macOS sources get a sweep of their own over what the bundle compiles: the Cocoa
+sources, the Finder extension and its broker, the configured plists, entitlements and
+installer scripts. Out of scope by the same logic: the macOS File Provider module, the
+updater, upstream's Packages project and its Debian/PPA publishing scripts. None of those
+is built or installed here.
 
 ## Which upstream version to pin
 
@@ -190,14 +208,14 @@ users update on their own schedule.
 The overlay is written against v35.0.x. Newer v35 patch releases should apply unchanged —
 check [nextcloud/desktop releases](https://github.com/nextcloud/desktop/releases). A new
 major means bumping `desktop_ref` and `builder_image` together, and re-checking the
-anchors, which the script will tell you about by failing. Windows needs no extra input:
-it reads the Craft blueprint branches from the tag's own `craftmaster.ini`.
+anchors, which the script will tell you about by failing. Windows and macOS need no extra
+input: they read the Craft blueprint branches from the tag's own `craftmaster.ini`.
 
 ## Building
 
 Actions → **Build: Gantara desktop sync client** → *Run workflow*.
 
-- `platform` — `linux` or `windows` (one per run; default `windows`).
+- `platform` — `linux`, `windows` or `macos` (one per run; default `windows`).
 - `desktop_ref` — the upstream tag to build (default `v35.0.3`).
 - `builder_image` — Nextcloud's own AppImage build container, as pinned by that tag's
   `.github/workflows/linux-appimage.yml`. Used for Linux. Bump it with the tag.
@@ -208,13 +226,19 @@ Actions → **Build: Gantara desktop sync client** → *Run workflow*.
 Linux is upstream's `admin/linux/build-appimage.sh`. Windows is KDE Craft via
 `clients/desktop/branding/build-windows.ps1` (same path as upstream's
 `windows-build-and-test.yml`), packaging an NSIS installer, signed once Azure is set up
-(see [Installing the Windows setup](#installing-the-windows-setup)). Both assets attach
-to the same **GitHub Release** (`desktop-<tag>`), which is a browser download and does
-not consume Actions artifact storage. After either platform, the `source` job attaches
+(see [Installing the Windows setup](#installing-the-windows-setup)). macOS is KDE Craft
+too, the way upstream's `mac-crafter` drives it: `build-macos.sh` builds the app natively
+on an Apple Silicon (`macos-15`) and an Intel (`macos-15-intel`) runner, upstream's
+`make_universal.py` merges the two, `mac-crafter codesign` signs the result, and
+`make-macos-pkg.sh` wraps it in an installer that is then notarised (see
+[Installing on macOS](#installing-on-macos)). Classic Finder sync only; the File Provider
+module stays off. All assets attach to the same **GitHub Release** (`desktop-<tag>`), which
+is a browser download and does not consume Actions artifact storage. After any platform,
+the `source` job attaches
 `Gantara_Desktop-<version>-source.tar.gz` ([`../make-source-tarball.sh`](../make-source-tarball.sh)):
 the upstream tag as `git archive`d, plus this folder, the shared scripts, the licence texts
 and the workflow at the commit the run built from. The archive is reproducible, so build
-both platforms of a version from the same commit and the second upload is the same file.
+every platform of a version from the same commit and later uploads are the same file.
 
 This repo is private. Customers download from the public
 [`Dunetrails/gantara-clients`](https://github.com/Dunetrails/gantara-clients) instead:
@@ -228,8 +252,9 @@ client must not reach customers any other way.
 
 `desktop-latest` in the public repo holds the newest version under fixed names
 (`Gantara_Desktop-x64-setup.exe`, `Gantara_Desktop-x86_64.AppImage`,
-`Gantara_Desktop-source.tar.gz`, `Gantara_Desktop-SHA256SUMS.txt`); gantara.eu links there.
-It only moves to a version once that version has both installers and its source tarball,
+`Gantara_Desktop-macos-universal.pkg`, `Gantara_Desktop-source.tar.gz`,
+`Gantara_Desktop-SHA256SUMS.txt`); gantara.eu links there.
+It only moves to a version once that version has all three installers and its source tarball,
 so a failed or not-yet-run platform build leaves the previous version in place.
 
 The web interface's client links (`customclient_*`, shown in Personal settings → Mobile &
@@ -282,6 +307,24 @@ shows “Windows protected your PC” → *More info* → *Run anyway*. Each Win
 the SmartScreen hint only while it says unsigned. How users verify:
 [`SIGNING.md`](../../public/gantara-clients/SIGNING.md).
 
+## Installing on macOS
+
+One `.pkg` for Apple Silicon and Intel, macOS 13 or later. It installs `Gantara.app` into
+`/Applications`, stops a running client first, and registers the Finder extension (sync
+badges and the context menu) for the logged-in user. Settings, keychain entries and the
+app group keep the Dunetrails identity like on the other platforms.
+
+**Signing.** There is no unsigned macOS release: Gatekeeper would refuse the app. The
+`macos` job needs the secrets in
+[`docs/runbooks/macos-code-signing.md`](../../docs/runbooks/macos-code-signing.md),
+including `MACOS_INSTALLER_P12`, and runs on `main` only; without them only an unsigned
+test build (`release=false`) is possible. `mac-crafter` signs every nested bundle,
+framework and library with the hardened runtime and the sandbox entitlements the build
+configured, the package is signed with the Developer ID Installer certificate, then
+notarised and stapled, and [`../macos-signing.sh`](../macos-signing.sh) verifies the
+package and the app inside it. How users verify:
+[`SIGNING.md`](../../public/gantara-clients/SIGNING.md).
+
 ### Local Windows VM (no Actions)
 
 Do **not** download the `.ps1` via raw.githubusercontent — chat/clipboard often
@@ -313,13 +356,13 @@ customers on a safe version is this procedure. It covers Gantara Talk too
    releases can wait for the next planned build.
 2. **Bump and build.** Set the new tag as the workflow default (`desktop_ref`, plus
    `builder_image` from the tag's `linux-appimage.yml`), commit, then run the build for
-   `linux` and for `windows` from that commit. Each run attaches its package and the source
+   `linux`, `windows` and `macos` from that commit. Each run attaches its package and the source
    tarball; a failing anchor in `apply-branding.sh` means upstream moved a string.
-3. **Check the release.** In the public repo: the versioned release has both installers, the
+3. **Check the release.** In the public repo: the versioned release has all three installers, the
    source tarball, the SHA256SUMS file with its `.sigstore.json` and the `signing.json`, and
    `desktop-latest` shows the new version in its title. Run the checks in
    [SIGNING.md](../../public/gantara-clients/SIGNING.md#check-a-download) once, install it on
-   Windows and Linux and add an account. Then rebuild the website so gantara.eu/download
+   Windows, Linux and a Mac and add an account. Then rebuild the website so gantara.eu/download
    shows the new version, its checksums and its signing state.
 4. **Tell the users.** The client cannot, so announce it on every tenant from the server.
    The [Announcement Center](https://apps.nextcloud.com/apps/announcementcenter) app
@@ -335,9 +378,10 @@ customers on a safe version is this procedure. It covers Gantara Talk too
 
 ## Limitations
 
-- **x86_64 Linux AppImage + Windows NSIS.** Windows is signed once Azure Artifact Signing is
-  configured; the AppImage has no embedded signature, the signed SHA256SUMS covers it. No macOS package (needs a Developer ID and
-  notarisation). WiX MSI can come later; Craft currently emits NSIS.
+- **x86_64 Linux AppImage, Windows NSIS, universal macOS .pkg.** Windows is signed once
+  Azure Artifact Signing is configured; the AppImage has no embedded signature, the signed
+  SHA256SUMS covers it; macOS is signed and notarised. WiX MSI can come later; Craft
+  currently emits NSIS. On macOS only classic Finder sync, no File Provider (virtual files).
 - **No updates.** The updater is compiled out, so a new version means a new build here and
   a new file for the user; see [Release procedure](#release-procedure).
 - Synced files are never touched by any of these scripts, including `--purge`. Saved

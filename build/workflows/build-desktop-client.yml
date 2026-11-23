@@ -378,12 +378,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Inkscape rasterises the icons during the build, as in upstream's macOS CI. The GNU
-      # tools are for apply-branding.sh only, which is written for GNU sed and mktemp.
+      # rsvg-convert rasterises the icons during the build (cmake takes it or Inkscape; the
+      # Inkscape cask downloads from inkscape.org, which proved flaky). The GNU tools are for
+      # apply-branding.sh only, which is written for GNU sed and mktemp.
       - name: Install build tools
-        run: |
-          brew install gnu-sed coreutils grep
-          brew install --cask inkscape
+        run: brew install gnu-sed coreutils grep librsvg
 
       # Only this step sees the GNU tools first on PATH; Craft and Xcode keep the BSD ones.
       - name: Apply Gantara branding
