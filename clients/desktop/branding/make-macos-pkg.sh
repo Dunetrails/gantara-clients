@@ -93,16 +93,23 @@ cat >"${work}/distribution.xml" <<EOF
 </installer-gui-script>
 EOF
 
-sign=()
-if [ -n "${MACOS_INSTALLER_IDENTITY:-}" ]; then
-    sign=(--sign "${MACOS_INSTALLER_IDENTITY}" --timestamp)
-    [ -z "${MACOS_KEYCHAIN:-}" ] || sign+=(--keychain "${MACOS_KEYCHAIN}")
-fi
 mkdir -p "$(dirname "${OUT_PKG}")"
 productbuild --distribution "${work}/distribution.xml" --resources "${work}/resources" \
-    --package-path "${work}/packages" "${sign[@]+"${sign[@]}"}" "${OUT_PKG}"
+    --package-path "${work}/packages" "${work}/unsigned.pkg"
 
-if [ "${#sign[@]}" -gt 0 ]; then
+# Signed separately with productsign: the import step grants productsign (not
+# productbuild) access to the key, and productbuild --sign waits for a keychain
+# prompt nobody can answer on a runner.
+if [ -n "${MACOS_INSTALLER_IDENTITY:-}" ]; then
+    keychain=()
+    [ -z "${MACOS_KEYCHAIN:-}" ] || keychain=(--keychain "${MACOS_KEYCHAIN}")
+    productsign --sign "${MACOS_INSTALLER_IDENTITY}" --timestamp "${keychain[@]+"${keychain[@]}"}" \
+        "${work}/unsigned.pkg" "${OUT_PKG}"
+else
+    mv "${work}/unsigned.pkg" "${OUT_PKG}"
+fi
+
+if [ -n "${MACOS_INSTALLER_IDENTITY:-}" ]; then
     echo "built ${OUT_PKG}, signed by ${MACOS_INSTALLER_IDENTITY} (requires macOS ${min_os})"
 else
     echo "built ${OUT_PKG}, unsigned (requires macOS ${min_os})"

@@ -490,7 +490,12 @@ jobs:
         run: |
           set -euo pipefail
           . platform/clients/desktop/branding/branding.env
-          swift build -c release --package-path desktop/admin/osx/mac-crafter
+          # Fetching its one dependency from GitHub has failed transiently; try three times.
+          for attempt in 1 2 3; do
+            swift build -c release --package-path desktop/admin/osx/mac-crafter && break
+            [ "${attempt}" -lt 3 ] || exit 1
+            sleep 30
+          done
           find "${APP}/Contents/Resources" -type f -print0 | while IFS= read -r -d '' f; do
             if file -b "${f}" | grep -q '^Mach-O'; then
               codesign --force --timestamp --options=runtime --sign "${MACOS_SIGN_IDENTITY}" "${f}"
@@ -503,6 +508,7 @@ jobs:
 
       - name: Build the installer package
         id: package
+        timeout-minutes: 15
         env:
           APP: ${{ steps.app.outputs.app }}
           STAGE: macos-in/desktop-macos-app-arm64
