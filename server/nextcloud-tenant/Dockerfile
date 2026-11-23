@@ -66,6 +66,12 @@ RUN set -eux; \
 
 # Apps now live in /usr/src/nextcloud/custom_apps and ship with every pod's webroot copy.
 
+# Starter files copied into a new account's Files on its first login (docs/starter-files.md).
+# Outside the webroot on purpose: nginx can never serve it, and the entrypoint's webroot copy
+# leaves it alone. Inert until a tenant points skeletondirectory at /opt/gantara/skeleton/{lang}
+# (customer file starterFiles: true); Nextcloud resolves {lang} as nl_BE -> nl -> default.
+COPY skeleton/ /opt/gantara/skeleton/
+
 # Bake the PHP INI overrides into the image conf.d. WHY here (not only via the chart's
 # nextcloud.phpConfigs): php-fpm reads php.ini directives from /usr/local/etc/php/conf.d just like
 # apache/CLI, BUT the Helm chart mounts phpConfigs into /usr/local/etc/php-fpm.d when the nginx
