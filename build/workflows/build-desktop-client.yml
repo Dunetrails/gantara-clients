@@ -378,6 +378,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      # v35's tray popup uses NSGlassEffectView, which needs the macOS 26 SDK; the image's
+      # default Xcode is older. Upstream's macOS CI builds with the latest stable Xcode too.
+      - name: Select the newest Xcode 26
+        run: |
+          set -euo pipefail
+          xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | grep -v -i beta | sort -V | tail -n1 || true)"
+          [ -n "${xcode}" ] || { echo "::error::No Xcode 26 on this runner image: $(ls -d /Applications/Xcode*.app | tr '\n' ' ')"; exit 1; }
+          sudo xcode-select -s "${xcode}/Contents/Developer"
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+
       # rsvg-convert rasterises the icons during the build (cmake takes it or Inkscape; the
       # Inkscape cask downloads from inkscape.org, which proved flaky). The GNU tools are for
       # apply-branding.sh only, which is written for GNU sed and mktemp.
