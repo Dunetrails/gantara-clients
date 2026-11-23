@@ -7,10 +7,10 @@ changes in the open-source software it runs.
 
 Click a link to download the newest version:
 
-| Application | Windows | Linux |
-|--|--|--|
-| **Gantara Desktop** — keeps your files in sync with your computer | [Download for Windows](https://github.com/Dunetrails/gantara-clients/releases/download/desktop-latest/Gantara_Desktop-x64-setup.exe) | [Download for Linux](https://github.com/Dunetrails/gantara-clients/releases/download/desktop-latest/Gantara_Desktop-x86_64.AppImage) |
-| **Gantara Talk** — chat and calls, on plans that include them | [Download for Windows](https://github.com/Dunetrails/gantara-clients/releases/download/talk-latest/Gantara_Talk-x64-setup.exe) | [Download for Linux](https://github.com/Dunetrails/gantara-clients/releases/download/talk-latest/Gantara_Talk-x86_64.AppImage) |
+| Application | Windows | Linux | macOS |
+|--|--|--|--|
+| **Gantara Desktop** — keeps your files in sync with your computer | [Download for Windows](https://github.com/Dunetrails/gantara-clients/releases/download/desktop-latest/Gantara_Desktop-x64-setup.exe) | [Download for Linux](https://github.com/Dunetrails/gantara-clients/releases/download/desktop-latest/Gantara_Desktop-x86_64.AppImage) | Not yet |
+| **Gantara Talk** — chat and calls, on plans that include them | [Download for Windows](https://github.com/Dunetrails/gantara-clients/releases/download/talk-latest/Gantara_Talk-x64-setup.exe) | [Download for Linux](https://github.com/Dunetrails/gantara-clients/releases/download/talk-latest/Gantara_Talk-x86_64.AppImage) | [Download for Mac](https://github.com/Dunetrails/gantara-clients/releases/download/talk-latest/Gantara_Talk-macos-universal.dmg) |
 
 Earlier versions are on the [Releases page](https://github.com/Dunetrails/gantara-clients/releases).
 Every release lists SHA-256 checksums of its files
@@ -28,8 +28,14 @@ installer is signed.
 
 **Linux:** make the AppImage executable (`chmod +x Gantara_*.AppImage`) and run it.
 
-**macOS, iPhone and Android:** there is no Gantara-branded version yet. See the Gantara help pages
-for how to connect from these devices.
+**macOS:** one download for Apple Silicon and Intel Macs. Open the
+disk image and drag *Gantara Talk* to *Applications*. It is signed and notarised by Apple: the
+first time you open it, macOS asks whether you want to open an app downloaded from the Internet;
+choose *Open*. Gantara Desktop for macOS is not available yet; see the Gantara help pages for how
+to sync files from a Mac.
+
+**iPhone and Android:** there is no Gantara-branded version yet. See the Gantara help pages for
+how to connect from these devices.
 
 ## These are modified, unofficial Nextcloud clients
 
