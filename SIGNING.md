@@ -81,10 +81,19 @@ spctl -a -vvv -t open --context context:primary-signature Gantara_Talk-macos-uni
 ```
 
 It must say `accepted`, `source=Notarized Developer ID` and
-`origin=Developer ID Application: Dunetrails (…)`. After installing, the same check on the app:
+`origin=Developer ID Application: Dunetrails (…)`. For the Gantara Desktop installer:
+
+```sh
+pkgutil --check-signature Gantara_Desktop-macos-universal.pkg
+spctl -a -vvv -t install Gantara_Desktop-macos-universal.pkg
+```
+
+The first must name `Developer ID Installer: Dunetrails (…)`, the second say `accepted` and
+`source=Notarized Developer ID`. After installing, the same check on the app:
 
 ```sh
 spctl -a -vvv "/Applications/Gantara Talk.app"
+spctl -a -vvv /Applications/Gantara.app
 ```
 
 macOS packages are only released signed and notarised; there is no unsigned macOS release.
@@ -118,12 +127,16 @@ job and is deleted at its end. Everything is signed with the hardened runtime an
 timestamp from Apple, then submitted to Apple's notary service, which scans it and issues a
 ticket; the ticket is stapled to the file, so Gatekeeper can check it offline.
 
+- Gantara Desktop: the app is built separately for Apple Silicon and Intel and merged into one
+  universal app, then signed inside-out (the Finder extension, every framework and library, the
+  app) with the signer from the upstream project. The installer package around it is signed
+  with the Developer ID Installer certificate, then notarised and stapled.
 - Gantara Talk: Electron Forge signs every executable, framework and library of the universal
   (Apple Silicon and Intel) app and has it notarised. The job then signs, notarises and staples
   the DMG around it.
-- Afterwards the job checks the DMG and the app inside with `codesign --verify --deep --strict`,
-  `spctl` and `stapler validate`, and fails if any of them is not signed by our team, lacks the
-  hardened runtime or has no ticket.
+- Afterwards the job checks the DMG or package and the app inside with
+  `codesign --verify --deep --strict`, `spctl` and `stapler validate`, and fails if any of them is
+  not signed by our team, lacks the hardened runtime or has no ticket.
 
 **Checksums (Sigstore).** After the builds, the publishing workflow writes the checksum file from
 the SHA-256 digests GitHub computed on upload and signs it with
