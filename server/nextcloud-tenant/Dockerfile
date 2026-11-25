@@ -53,8 +53,11 @@ COPY install-apps.sh /usr/local/bin/install-apps.sh
 COPY patch-apps.sh /usr/local/bin/patch-apps.sh
 # jq/curl are only needed at build time to resolve+fetch app tarballs; purge them after so the
 # runtime image stays the stock image plus the baked custom_apps (no extra runtime surface).
+# apt-get upgrade: the nextcloud:<tag> base is only republished occasionally, so its Debian
+# packages lag trixie-security; upgrading here is what makes a rebuild pick up OS fixes.
 RUN set -eux; \
     apt-get update; \
+    apt-get upgrade -y --no-install-recommends; \
     apt-get install -y --no-install-recommends jq curl ca-certificates; \
     chmod +x /usr/local/bin/install-apps.sh /usr/local/bin/patch-apps.sh; \
     /usr/local/bin/install-apps.sh ${APPS}; \
