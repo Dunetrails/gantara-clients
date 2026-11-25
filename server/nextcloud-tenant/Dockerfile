@@ -50,7 +50,7 @@ ARG APPS=""
 
 COPY install-apps.sh /usr/local/bin/install-apps.sh
 # Build-time source patches to baked apps (see the script header for what and why).
-COPY patch-apps.sh /usr/local/bin/patch-apps.sh
+COPY patch-apps.sh patch-isolation.php /usr/local/bin/
 # jq/curl are only needed at build time to resolve+fetch app tarballs; purge them after so the
 # runtime image stays the stock image plus the baked custom_apps (no extra runtime surface).
 # apt-get upgrade: the nextcloud:<tag> base is only republished occasionally, so its Debian
@@ -63,7 +63,7 @@ RUN set -eux; \
     /usr/local/bin/install-apps.sh ${APPS}; \
     /usr/local/bin/patch-apps.sh; \
     chown -R www-data:www-data /usr/src/nextcloud/custom_apps; \
-    rm -f /usr/local/bin/install-apps.sh /usr/local/bin/patch-apps.sh; \
+    rm -f /usr/local/bin/install-apps.sh /usr/local/bin/patch-apps.sh /usr/local/bin/patch-isolation.php; \
     apt-get purge -y --auto-remove jq curl; \
     rm -rf /var/lib/apt/lists/*
 

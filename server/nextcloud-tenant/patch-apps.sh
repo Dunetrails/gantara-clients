@@ -1,6 +1,10 @@
 #!/bin/sh
 # Build-time patches to baked appstore apps (runs after install-apps.sh).
 #
+# patch-isolation.php: dav and Deck honour shareapi_only_share_with_group_members (principals,
+# DAV sharing, Deck sharing and import); see that file's header. It fails the build when a
+# pattern no longer matches exactly once.
+#
 # integration_google: request the narrowest Google OAuth scopes, as required by Google's OAuth
 # verification (least privilege; the consent screen must show exactly the scopes declared in the
 # Cloud Console Data Access page):
@@ -18,6 +22,8 @@ set -eu
 
 CUSTOM_APPS=/usr/src/nextcloud/custom_apps
 G="${CUSTOM_APPS}/integration_google"
+
+php /usr/local/bin/patch-isolation.php
 
 [ -d "${G}" ] || { echo "patch-apps: integration_google not baked, nothing to do"; exit 0; }
 
