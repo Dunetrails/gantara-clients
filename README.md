@@ -59,7 +59,7 @@ for the newest version). The release notes name the upstream tag.
 |--|--|--|
 | [`clients/desktop`](clients/desktop) | Branding and build scripts for Gantara Desktop | [nextcloud/desktop](https://github.com/nextcloud/desktop) |
 | [`clients/talk-desktop`](clients/talk-desktop) | Branding, Linux tray helper and build scripts for Gantara Talk | [nextcloud/talk-desktop](https://github.com/nextcloud/talk-desktop) |
-| [`server/nextcloud-tenant`](server/nextcloud-tenant) | The server image Gantara runs, including `patch-apps.sh`, the one change Gantara makes to server-side code (the Google import app `integration_google` requests narrower permissions) | [nextcloud/server](https://github.com/nextcloud/server), [nextcloud/integration_google](https://github.com/nextcloud/integration_google) |
+| [`server/nextcloud-tenant`](server/nextcloud-tenant) | The server image Gantara runs, including `patch-apps.sh`, the one change Gantara makes to upstream server-side code (the Google import app `integration_google` requests narrower permissions), and `gantara_isolation`, Gantara's own Nextcloud app that applies the "share with group members only" rule to calendars, contacts and Deck on the shared instance | [nextcloud/server](https://github.com/nextcloud/server), [nextcloud/integration_google](https://github.com/nextcloud/integration_google) |
 | [`build/workflows`](build/workflows) | The build pipelines that produce the releases, for reference | — |
 
 To rebuild a release: check out the upstream tag named in its release notes, run the folder's
