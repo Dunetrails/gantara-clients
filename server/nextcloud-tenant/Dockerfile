@@ -50,7 +50,13 @@ ARG APPS=""
 
 COPY install-apps.sh /usr/local/bin/install-apps.sh
 # Build-time source patches to baked apps (see the script header for what and why).
-COPY patch-apps.sh patch-isolation.php /usr/local/bin/
+COPY patch-apps.sh /usr/local/bin/
+# Our own app: the Files sharing rule for DAV principals, DAV sharing, Deck and the OCS user
+# lookup (see its
+# appinfo/info.xml and docs/plans.md "Contacts and calendar on the shared instance"). It ships
+# no signature.json, so the integrity check skips it; the migrate Job enables it on
+# userIsolation tenants only. Its tests/ stay out of the image (.dockerignore).
+COPY gantara_isolation/ /usr/src/nextcloud/custom_apps/gantara_isolation/
 # jq/curl are only needed at build time to resolve+fetch app tarballs; purge them after so the
 # runtime image stays the stock image plus the baked custom_apps (no extra runtime surface).
 # apt-get upgrade: the nextcloud:<tag> base is only republished occasionally, so its Debian
@@ -63,7 +69,7 @@ RUN set -eux; \
     /usr/local/bin/install-apps.sh ${APPS}; \
     /usr/local/bin/patch-apps.sh; \
     chown -R www-data:www-data /usr/src/nextcloud/custom_apps; \
-    rm -f /usr/local/bin/install-apps.sh /usr/local/bin/patch-apps.sh /usr/local/bin/patch-isolation.php; \
+    rm -f /usr/local/bin/install-apps.sh /usr/local/bin/patch-apps.sh; \
     apt-get purge -y --auto-remove jq curl; \
     rm -rf /var/lib/apt/lists/*
 

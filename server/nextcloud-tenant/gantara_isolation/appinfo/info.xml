@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+	<id>gantara_isolation</id>
+	<name>Gantara isolation</name>
+	<summary>Applies the Files sharing rule (share with group members only) to DAV principals, DAV sharing and Deck</summary>
+	<description><![CDATA[With "Restrict users to only share with users in their groups" on, Files sharing only lets two
+accounts see each other when they share a group outside the exclusion list. This app applies the
+same rule to CalDAV/CardDAV principals and homes, calendar and address book sharing, calendar
+delegation, group principals and Deck board sharing, transfer, cloning and import, and makes the
+provisioning API's user lookup answer the same for invisible and unknown accounts. It does nothing
+when the setting is off or nobody is signed in. Gantara enables it on the shared instance only
+(docs/plans.md, "Contacts and calendar on the shared instance").]]></description>
+	<version>1.0.0</version>
+	<licence>agpl</licence>
+	<author>Dunetrails</author>
+	<namespace>GantaraIsolation</namespace>
+	<category>security</category>
+	<bugs>https://github.com/Dunetrails/k8s-platform-ovh/issues</bugs>
+	<dependencies>
+		<nextcloud min-version="35" max-version="35"/>
+	</dependencies>
+</info>
