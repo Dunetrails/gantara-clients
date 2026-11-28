@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+	<id>gantara_mail</id>
+	<name>Gantara Mail setup</name>
+	<summary>Lets the Gantara portal add a customer's Gantara Mail mailbox to their Nextcloud Mail app</summary>
+	<description><![CDATA[An admin-only OCS API for the gantara-portal. When a customer sets their mailbox password in the
+Gantara dashboard, the portal passes it through once and this app creates (or updates) the
+account in that user's Nextcloud Mail, with the Gantara Mail servers, through Mail's own services.
+It removes the account again when the mailbox is deleted or handed to someone else. The servers
+come from this app's config, never from the request. Gantara enables it on the shared instance
+only (k8s-platform-ovh docs/gantara-mail.md, "Nextcloud Mail on the shared instance").]]></description>
+	<version>1.0.0</version>
+	<licence>agpl</licence>
+	<author>Dunetrails</author>
+	<namespace>GantaraMail</namespace>
+	<category>integration</category>
+	<bugs>https://github.com/Dunetrails/k8s-platform-ovh/issues</bugs>
+	<dependencies>
+		<nextcloud min-version="35" max-version="35"/>
+	</dependencies>
+</info>

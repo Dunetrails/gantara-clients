@@ -57,6 +57,11 @@ COPY patch-apps.sh /usr/local/bin/
 # no signature.json, so the integrity check skips it; the migrate Job enables it on
 # userIsolation tenants only. Its tests/ stay out of the image (.dockerignore).
 COPY gantara_isolation/ /usr/src/nextcloud/custom_apps/gantara_isolation/
+# Our own app: the admin-only API the gantara-portal uses to add a customer's Gantara Mail mailbox
+# to their Nextcloud Mail when they set its password (gantara_mail/appinfo/info.xml, docs/gantara-mail.md
+# "Nextcloud Mail on the shared instance"). Like gantara_isolation: no signature.json, tests/ kept out
+# of the image, enabled by the migrate Job on mailByPortal tenants only.
+COPY gantara_mail/ /usr/src/nextcloud/custom_apps/gantara_mail/
 # jq/curl are only needed at build time to resolve+fetch app tarballs; purge them after so the
 # runtime image stays the stock image plus the baked custom_apps (no extra runtime surface).
 # apt-get upgrade: the nextcloud:<tag> base is only republished occasionally, so its Debian
